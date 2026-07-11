@@ -16,6 +16,7 @@ export interface Score {
   composer: string;
   file_path: string | null;
   external_url: string | null;
+  midi_parsed: boolean;
   parts_data: {
     soprano: VoicePart;
     alto: VoicePart;

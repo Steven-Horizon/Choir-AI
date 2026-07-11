@@ -10,6 +10,7 @@ interface Score {
   composer: string;
   file_path: string | null;
   external_url: string | null;
+  midi_parsed: boolean;
   tempo: number;
   key_sig: string;
   time_signature: string;
@@ -132,6 +133,9 @@ export default function ScoreLibrary() {
                 </div>
                 <div className="flex flex-col items-end gap-1">
                   <span className="text-xs text-neutral-600 bg-neutral-800 px-2 py-1 rounded">{s.time_signature}</span>
+                  {s.midi_parsed && (
+                    <span className="text-[10px] bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">MIDI</span>
+                  )}
                   {s.external_url && (
                     <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">网盘</span>
                   )}
@@ -202,12 +206,12 @@ export default function ScoreLibrary() {
                   <label className="border-2 border-dashed border-neutral-700 rounded-lg p-6 text-center cursor-pointer hover:border-amber-500/50 transition-colors block">
                     <Upload className="w-6 h-6 text-neutral-500 mx-auto mb-2" />
                     <p className="text-sm text-neutral-400">{file ? file.name : '点击上传文件'}</p>
-                    <p className="text-xs text-neutral-600 mt-1">支持：PDF、图片、音频(mp3/wav)</p>
+                    <p className="text-xs text-neutral-600 mt-1">支持：PDF、图片、MIDI(.mid)、音频(mp3/wav)</p>
                     <p className="text-xs text-amber-500/70 mt-1">⚠ 超过2MB的文件将只保存信息，不上传文件内容</p>
                     {file && file.size > MAX_FILE_SIZE && (
                       <p className="text-xs text-amber-400 mt-1">此文件 { (file.size / 1024 / 1024).toFixed(1) }MB 超过限制，建议用"网盘链接"方式</p>
                     )}
-                    <input type="file" accept=".pdf,.png,.jpg,.jpeg,.mp3,.wav,.m4a" onChange={e => setFile(e.target.files?.[0] || null)} className="hidden" />
+                    <input type="file" accept=".pdf,.png,.jpg,.jpeg,.mp3,.wav,.m4a,.mid,.midi" onChange={e => setFile(e.target.files?.[0] || null)} className="hidden" />
                   </label>
                 </div>
               ) : (
