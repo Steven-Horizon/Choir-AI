@@ -129,10 +129,16 @@ export default function ScoreLibrary() {
           <h2 className="text-2xl font-bold">我的谱子库</h2>
           <p className="text-sm text-neutral-500 mt-1">上传谱子或直接贴网盘链接</p>
         </div>
-        <button onClick={() => setShowUpload(true)}
-          className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-black font-medium px-4 py-2.5 rounded-lg">
-          <Plus className="w-4 h-4" />上传谱子
-        </button>
+        <div className="flex gap-2">
+          <Link to="/editor"
+            className="flex items-center gap-2 px-4 py-2.5 bg-green-500/15 text-green-400 rounded-lg hover:bg-green-500/25 text-sm font-medium">
+            <Music className="w-4 h-4" />在线打谱
+          </Link>
+          <button onClick={() => setShowUpload(true)}
+            className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-black font-medium px-4 py-2.5 rounded-lg">
+            <Plus className="w-4 h-4" />上传谱子
+          </button>
+        </div>
       </div>
 
       {scores.length === 0 ? (

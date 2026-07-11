@@ -10,6 +10,7 @@ import AIAgent from '@/pages/AIAgent';
 import TrainingPlans from '@/pages/TrainingPlans';
 import Settings from '@/pages/Settings';
 import SheetMusic from '@/pages/SheetMusic';
+import ScoreEditor from '@/pages/ScoreEditor';
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="/plans" element={<TrainingPlans />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/sheet/:id" element={<SheetMusic />} />
+          <Route path="/editor" element={<ScoreEditor />} />
         </Routes>
       </Layout>
     </HashRouter>
