@@ -24,6 +24,7 @@ export default function ScoreLibrary() {
   const [composer, setComposer] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
 
   useEffect(() => { fetchScores(); }, []);
 
@@ -31,7 +32,20 @@ export default function ScoreLibrary() {
     fetch(`${API_BASE}/api/scores`).then(r => r.json()).then(setScores);
   };
 
-  const [uploadError, setUploadError] = useState('');
+  // Convert file to base64
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        // Remove data URL prefix (e.g., "data:application/pdf;base64,")
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,20 +53,32 @@ export default function ScoreLibrary() {
     setUploading(true);
     setUploadError('');
     try {
-      const formData = new FormData();
-      formData.append('title', title);
-      formData.append('composer', composer);
-      if (file) formData.append('file', file);
-      const res = await fetch(`${API_BASE}/api/scores`, { method: 'POST', body: formData });
+      let fileData = null;
+      let fileName = null;
+      let fileType = null;
+
+      if (file) {
+        fileData = await fileToBase64(file);
+        fileName = file.name;
+        fileType = file.type;
+      }
+
+      const res = await fetch(`${API_BASE}/api/scores`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, composer, fileData, fileName, fileType }),
+      });
+
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `上传失败 (${res.status})`);
       }
+
       setShowUpload(false);
       setTitle(''); setComposer(''); setFile(null);
       fetchScores();
     } catch (err: any) {
-      setUploadError(err.message || '上传失败，请确保后端已启动');
+      setUploadError(err.message || '上传失败');
     }
     setUploading(false);
   };
@@ -138,8 +164,8 @@ export default function ScoreLibrary() {
                 <label className="border-2 border-dashed border-neutral-700 rounded-lg p-6 text-center cursor-pointer hover:border-amber-500/50 transition-colors block">
                   <Upload className="w-6 h-6 text-neutral-500 mx-auto mb-2" />
                   <p className="text-sm text-neutral-400">{file ? file.name : '点击上传文件'}</p>
-                  <p className="text-xs text-neutral-600 mt-1">支持：PDF、图片、音频(mp3/wav)、其他</p>
-                  <input type="file" accept=".pdf,.png,.jpg,.jpeg,.mp3,.wav,.m4a,.txt,.doc,.docx,.xml,.mid,.midi" onChange={e => setFile(e.target.files?.[0] || null)} className="hidden" />
+                  <p className="text-xs text-neutral-600 mt-1">支持：PDF、图片、音频(mp3/wav)</p>
+                  <input type="file" accept=".pdf,.png,.jpg,.jpeg,.mp3,.wav,.m4a" onChange={e => setFile(e.target.files?.[0] || null)} className="hidden" />
                 </label>
               </div>
               {uploadError && (

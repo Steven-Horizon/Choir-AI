@@ -1,9 +1,7 @@
 // Vercel Serverless Function - ChoirAI Backend
 const express = require('express');
 const cors = require('cors');
-const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
 const https = require('https');
 
 const app = express();
@@ -12,23 +10,13 @@ const app = express();
 const DEEPSEEK_API_KEY = process.env.DEEPEEK_API_KEY || 'sk-7fa9ea181c2748d793f26f184fe756de';
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 // In-memory storage for Vercel (no SQLite in serverless)
 const scores = [];
 const sessions = [];
 const messages = [];
-
-// Upload setup (store in /tmp for serverless)
-const uploadsDir = '/tmp/uploads';
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-const storage = multer.diskStorage({
-  destination: uploadsDir,
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + '-' + Math.random().toString(36).slice(2) + path.extname(file.originalname));
-  }
-});
-const upload = multer({ storage });
 
 function generateScoreParts(title) {
   return {
@@ -49,15 +37,38 @@ app.get('/api/scores/:id', (req, res) => {
   res.json(s);
 });
 
-app.post('/api/scores', upload.single('file'), (req, res) => {
-  const { title, composer } = req.body;
+// Store files as base64 in memory (Vercel serverless compatible)
+app.post('/api/scores', (req, res) => {
+  const { title, composer, fileData, fileName, fileType } = req.body;
   if (!title) return res.status(400).json({ error: 'Title required' });
-  const filePath = req.file ? `/uploads/${req.file.filename}` : null;
+
+  let file_path = null;
+  if (fileData && fileName) {
+    const ext = path.extname(fileName) || '';
+    const safeName = Date.now() + '-' + Math.random().toString(36).slice(2) + ext;
+    file_path = `/uploads/${safeName}`;
+    // Store base64 data in memory (keyed by filename)
+    fileStorage[safeName] = { data: fileData, type: fileType || 'application/octet-stream', name: fileName };
+  }
+
   const parts = generateScoreParts(title);
   const id = scores.length + 1;
-  const result = { id, title, composer: composer || '', file_path: filePath, tempo: parts.tempo, key_sig: parts.key, time_signature: parts.timeSignature, total_measures: parts.totalMeasures, parts_data: parts, created_at: new Date().toISOString() };
+  const result = { id, title, composer: composer || '', file_path, tempo: parts.tempo, key_sig: parts.key, time_signature: parts.timeSignature, total_measures: parts.totalMeasures, parts_data: parts, created_at: new Date().toISOString() };
   scores.push(result);
   res.json(result);
+});
+
+// In-memory file storage
+const fileStorage = {};
+
+// Serve uploaded files from memory
+app.get('/uploads/:filename', (req, res) => {
+  const file = fileStorage[req.params.filename];
+  if (!file) return res.status(404).json({ error: 'File not found' });
+  const buffer = Buffer.from(file.data, 'base64');
+  res.setHeader('Content-Type', file.type);
+  res.setHeader('Content-Disposition', `inline; filename="${file.name}"`);
+  res.send(buffer);
 });
 
 // ========== CHAT (DeepSeek) ==========
@@ -71,14 +82,36 @@ function callDeepSeek(msgs) {
 }
 
 app.post('/api/chat', async (req, res) => {
-  const { message, sessionId } = req.body;
-  if (!message) return res.status(400).json({ error: 'Message required' });
-  
+  const { message, sessionId, attachments } = req.body;
+  if (!message && (!attachments || attachments.length === 0)) return res.status(400).json({ error: 'Message or attachments required' });
+
   const sid = sessionId || Date.now();
   const history = messages.filter(m => m.session_id === sid);
-  messages.push({ session_id: sid, role: 'user', content: message, created_at: new Date().toISOString() });
 
-  const msgs = [{ role: 'system', content: '你是 ChoirAI 合唱智能训练助手，擅长合唱训练指导、乐理知识、谱面分析、声部协调。' }, ...history.map(h => ({ role: h.role, content: h.content })), { role: 'user', content: message }];
+  // Build message content with attachments
+  let userContent = message || '';
+  const msgs = [{ role: 'system', content: '你是 ChoirAI 合唱智能训练助手，擅长合唱训练指导、乐理知识、谱面分析、声部协调。' }];
+
+  // Add history
+  history.forEach(h => msgs.push({ role: h.role, content: h.content }));
+
+  // If there are image attachments, format as multimodal content
+  if (attachments && attachments.length > 0) {
+    const contentParts = [];
+    if (userContent) contentParts.push({ type: 'text', text: userContent });
+    attachments.forEach(att => {
+      if (att.type && att.type.startsWith('image/')) {
+        contentParts.push({ type: 'image_url', image_url: { url: `data:${att.type};base64,${att.data}` } });
+      } else {
+        contentParts.push({ type: 'text', text: `[附件: ${att.name || '文件'}]` });
+      }
+    });
+    msgs.push({ role: 'user', content: contentParts });
+  } else {
+    msgs.push({ role: 'user', content: userContent });
+  }
+
+  messages.push({ session_id: sid, role: 'user', content: userContent, created_at: new Date().toISOString() });
 
   try {
     const aiContent = await callDeepSeek(msgs);
@@ -111,9 +144,6 @@ app.get('/api/rehearsal/records', (req, res) => {
 
 // ========== PLANS ==========
 app.get('/api/plans', (req, res) => { res.json([]); });
-
-// ========== UPLOADS (static) ==========
-app.use('/uploads', express.static(uploadsDir));
 
 // ========== SERVE FRONTEND ==========
 app.use(express.static(path.join(__dirname, '..', 'dist')));

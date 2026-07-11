@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Menu, Plus, Send, Bot, User, Trash2, X,
-  MessageSquare, Sparkles, ChevronLeft, Loader2
+  MessageSquare, Sparkles, ChevronLeft, Loader2,
+  Paperclip, Image, FileText
 } from 'lucide-react';
 import { API_BASE } from '@/config';
 import ReactMarkdown from 'react-markdown';
@@ -11,6 +12,14 @@ interface ChatMessage {
   id: number;
   role: 'user' | 'assistant';
   content: string;
+  attachments?: Attachment[];
+}
+
+interface Attachment {
+  name: string;
+  type: string;
+  data: string; // base64
+  preview?: string; // data URL for preview
 }
 
 interface ChatSession {
@@ -43,7 +52,7 @@ const WELCOME_MSG: ChatMessage = {
 - **音准/节奏指导** — 针对性的练习建议
 - **合唱知识问答** — 乐理、发声技巧、声部配合
 
-试试问我：「如何制定14天训练计划？」`,
+支持上传图片、PDF等文件让我分析！`,
 };
 
 export default function AIAgent() {
@@ -55,8 +64,10 @@ export default function AIAgent() {
   const [loading, setLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentSession = sessions.find(s => s.id === currentId);
 
@@ -87,6 +98,7 @@ export default function AIAgent() {
     setCurrentId(newId);
     setMessages([WELCOME_MSG]);
     setInput('');
+    setAttachments([]);
     setSidebarOpen(false);
   };
 
@@ -95,6 +107,7 @@ export default function AIAgent() {
     const s = sessions.find(x => x.id === id);
     if (s) setMessages(s.messages);
     setSidebarOpen(false);
+    setAttachments([]);
   };
 
   const deleteSession = (e: React.MouseEvent, id: string) => {
@@ -112,8 +125,55 @@ export default function AIAgent() {
     }
   };
 
+  // Convert file to base64
+  const fileToBase64 = (file: File): Promise<Attachment> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.split(',')[1];
+        resolve({
+          name: file.name,
+          type: file.type,
+          data: base64,
+          preview: result,
+        });
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const newAttachments: Attachment[] = [];
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      // Check file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        alert(`文件 ${file.name} 超过 5MB 限制，已跳过`);
+        continue;
+      }
+      try {
+        const att = await fileToBase64(file);
+        newAttachments.push(att);
+      } catch {
+        alert(`文件 ${file.name} 读取失败`);
+      }
+    }
+    setAttachments(prev => [...prev, ...newAttachments]);
+    // Reset input so same file can be selected again
+    e.target.value = '';
+  };
+
+  const removeAttachment = (index: number) => {
+    setAttachments(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleSend = async () => {
-    if (!input.trim() || loading) return;
+    if ((!input.trim() && attachments.length === 0) || loading) return;
     const content = input.trim();
     setInput('');
 
@@ -123,7 +183,7 @@ export default function AIAgent() {
     if (!sid) {
       sid = 'chat_' + Date.now();
       const newSession: ChatSession = {
-        id: sid, title: content.slice(0, 20),
+        id: sid, title: content.slice(0, 20) || attachments[0]?.name || '新会话',
         messages: [WELCOME_MSG], createdAt: new Date().toLocaleString(),
       };
       currentSessions = [newSession, ...sessions];
@@ -131,24 +191,37 @@ export default function AIAgent() {
       setCurrentId(sid);
     }
 
-    // Add user message
-    const userMsg: ChatMessage = { id: Date.now(), role: 'user', content };
+    // Add user message with attachments
+    const userMsg: ChatMessage = {
+      id: Date.now(),
+      role: 'user',
+      content,
+      attachments: attachments.length > 0 ? [...attachments] : undefined,
+    };
     const updatedMessages = [...messages.filter(m => m.id !== 0 || messages.length === 1), userMsg];
     setMessages(updatedMessages);
 
-    // Update session title if first real message
+    // Update session title and messages
     setSessions(currentSessions.map(s => {
-      if (s.id === sid && s.title === '新会话') return { ...s, title: content.slice(0, 20), messages: updatedMessages };
+      if (s.id === sid && s.title === '新会话') return { ...s, title: content.slice(0, 20) || attachments[0]?.name || '新会话', messages: updatedMessages };
       if (s.id === sid) return { ...s, messages: updatedMessages };
       return s;
     }));
+
+    // Clear attachments after sending
+    const sentAttachments = [...attachments];
+    setAttachments([]);
 
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: content, sessionId: sid }),
+        body: JSON.stringify({
+          message: content,
+          sessionId: sid,
+          attachments: sentAttachments.map(a => ({ name: a.name, type: a.type, data: a.data })),
+        }),
       });
       if (!res.ok) throw new Error('API failed');
       const data = await res.json();
@@ -160,7 +233,7 @@ export default function AIAgent() {
     } catch {
       const fallback: ChatMessage = {
         id: Date.now() + 1, role: 'assistant',
-        content: '抱歉，AI服务暂时不可用。请确保后端已启动（`cd backend && node server.js`），或稍后重试。',
+        content: '抱歉，AI服务暂时不可用。请确保后端已启动，或稍后重试。',
       };
       setMessages([...updatedMessages, fallback]);
     }
@@ -280,6 +353,27 @@ export default function AIAgent() {
                   ? 'bg-amber-500 text-black'
                   : 'bg-neutral-800/80 border border-neutral-700/50 text-neutral-200'
               }`}>
+                {/* Show attachments for user messages */}
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {msg.attachments.map((att, i) => (
+                      <div key={i} className="relative">
+                        {att.type?.startsWith('image/') ? (
+                          <img
+                            src={att.preview}
+                            alt={att.name}
+                            className="max-w-[200px] max-h-[150px] rounded-lg object-cover"
+                          />
+                        ) : (
+                          <div className="flex items-center gap-1.5 bg-black/20 rounded-lg px-3 py-2 text-xs">
+                            <FileText className="w-3.5 h-3.5" />
+                            <span className="truncate max-w-[120px]">{att.name}</span>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {msg.role === 'assistant' ? (
                   <div className="text-sm leading-relaxed prose prose-invert prose-sm max-w-none">
                     <ReactMarkdown>{msg.content}</ReactMarkdown>
@@ -309,27 +403,80 @@ export default function AIAgent() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input */}
+        {/* Input Area */}
         <div className="p-3 border-t border-neutral-800 bg-neutral-900/80 backdrop-blur-sm">
+          {/* Attachment previews */}
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2 max-w-3xl mx-auto">
+              {attachments.map((att, i) => (
+                <div key={i} className="relative group">
+                  {att.type?.startsWith('image/') ? (
+                    <div className="relative">
+                      <img
+                        src={att.preview}
+                        alt={att.name}
+                        className="w-16 h-16 rounded-lg object-cover border border-neutral-700"
+                      />
+                      <button
+                        onClick={() => removeAttachment(i)}
+                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="w-3 h-3 text-white" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 bg-neutral-800 rounded-lg px-3 py-1.5 text-xs border border-neutral-700">
+                      <FileText className="w-3.5 h-3.5 text-neutral-400" />
+                      <span className="truncate max-w-[100px] text-neutral-300">{att.name}</span>
+                      <button
+                        onClick={() => removeAttachment(i)}
+                        className="ml-1 text-neutral-500 hover:text-red-400"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="flex items-end gap-2 max-w-3xl mx-auto">
+            {/* File attachment button */}
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="w-10 h-10 rounded-xl bg-neutral-800 flex items-center justify-center hover:bg-neutral-700 transition-colors flex-shrink-0 text-neutral-400"
+              title="上传文件"
+            >
+              <Paperclip className="w-4 h-4" />
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept="image/*,.pdf,.txt,.doc,.docx"
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+
             <textarea
               ref={inputRef}
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="问我关于合唱训练的问题..."
+              placeholder="问我关于合唱训练的问题，或上传图片/文件..."
               rows={1}
               className="flex-1 bg-neutral-800 border border-neutral-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500 resize-none min-h-[40px] max-h-[120px]"
             />
             <button
               onClick={handleSend}
-              disabled={loading || !input.trim()}
+              disabled={loading || (!input.trim() && attachments.length === 0)}
               className="w-10 h-10 rounded-xl bg-amber-500 flex items-center justify-center hover:bg-amber-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex-shrink-0"
             >
               <Send className="w-4 h-4 text-black" />
             </button>
           </div>
-          <p className="text-[10px] text-neutral-600 text-center mt-2">AI生成内容仅供参考</p>
+          <p className="text-[10px] text-neutral-600 text-center mt-2">支持上传图片、PDF等文件让AI分析 · 单文件最大5MB</p>
         </div>
       </div>
     </div>
