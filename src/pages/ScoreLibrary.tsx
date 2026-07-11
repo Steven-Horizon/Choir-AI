@@ -47,6 +47,8 @@ export default function ScoreLibrary() {
     });
   };
 
+  const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB limit for base64 upload
+
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title) return;
@@ -58,9 +60,16 @@ export default function ScoreLibrary() {
       let fileType = null;
 
       if (file) {
-        fileData = await fileToBase64(file);
-        fileName = file.name;
-        fileType = file.type;
+        // Check file size - if too large, only store metadata
+        if (file.size > MAX_FILE_SIZE) {
+          fileName = file.name;
+          fileType = file.type;
+          // fileData stays null - backend will create record without file content
+        } else {
+          fileData = await fileToBase64(file);
+          fileName = file.name;
+          fileType = file.type;
+        }
       }
 
       const res = await fetch(`${API_BASE}/api/scores`, {
@@ -69,6 +78,9 @@ export default function ScoreLibrary() {
         body: JSON.stringify({ title, composer, fileData, fileName, fileType }),
       });
 
+      if (res.status === 413) {
+        throw new Error('文件太大（超过2MB）。已保存谱子信息，文件未上传。如需上传大文件，建议压缩后重试。');
+      }
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `上传失败 (${res.status})`);
@@ -165,6 +177,10 @@ export default function ScoreLibrary() {
                   <Upload className="w-6 h-6 text-neutral-500 mx-auto mb-2" />
                   <p className="text-sm text-neutral-400">{file ? file.name : '点击上传文件'}</p>
                   <p className="text-xs text-neutral-600 mt-1">支持：PDF、图片、音频(mp3/wav)</p>
+                  <p className="text-xs text-amber-500/70 mt-1">⚠ 超过2MB的文件将只保存信息，不上传文件内容</p>
+                  {file && file.size > MAX_FILE_SIZE && (
+                    <p className="text-xs text-amber-400 mt-1">此文件 { (file.size / 1024 / 1024).toFixed(1) }MB 超过限制，将只保存谱子信息</p>
+                  )}
                   <input type="file" accept=".pdf,.png,.jpg,.jpeg,.mp3,.wav,.m4a" onChange={e => setFile(e.target.files?.[0] || null)} className="hidden" />
                 </label>
               </div>
