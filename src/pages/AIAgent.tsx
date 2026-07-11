@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Menu, Plus, Send, Bot, User, Trash2, X,
   MessageSquare, Sparkles, ChevronLeft, Loader2,
-  Paperclip, Image, FileText
+  Paperclip, FileText
 } from 'lucide-react';
 import { API_BASE } from '@/config';
 import ReactMarkdown from 'react-markdown';

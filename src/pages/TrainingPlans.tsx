@@ -120,7 +120,7 @@ export default function TrainingPlans() {
     setLoading(false);
   };
 
-  const importPlan = async (plan: Plan) => {
+  const importPlan = async (_plan: Plan) => {
     // Import just means the user acknowledges it - it already exists in shared list
     // Just refresh to see it
     await fetchPlans();
