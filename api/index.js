@@ -42,7 +42,7 @@ app.get('/api/scores/:id', (req, res) => {
 });
 
 app.post('/api/scores', (req, res) => {
-  const { title, composer, fileData, fileName, fileType } = req.body;
+  const { title, composer, fileData, fileName, fileType, externalUrl } = req.body;
   if (!title) return res.status(400).json({ error: 'Title required' });
 
   let file_path = null;
@@ -55,7 +55,7 @@ app.post('/api/scores', (req, res) => {
 
   const parts = generateScoreParts(title);
   const id = scores.length + 1;
-  const result = { id, title, composer: composer || '', file_path, tempo: parts.tempo, key_sig: parts.key, time_signature: parts.timeSignature, total_measures: parts.totalMeasures, parts_data: parts, created_at: new Date().toISOString() };
+  const result = { id, title, composer: composer || '', file_path, external_url: externalUrl || null, tempo: parts.tempo, key_sig: parts.key, time_signature: parts.timeSignature, total_measures: parts.totalMeasures, parts_data: parts, created_at: new Date().toISOString() };
   scores.push(result);
   res.json(result);
 });

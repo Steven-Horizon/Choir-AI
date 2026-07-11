@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Music, Upload, Plus, FileMusic, Eye, X } from 'lucide-react';
+import { Music, Upload, Plus, FileMusic, Eye, X, ExternalLink, Link as LinkIcon } from 'lucide-react';
 import { API_BASE } from '@/config';
 
 
@@ -9,6 +9,7 @@ interface Score {
   title: string;
   composer: string;
   file_path: string | null;
+  external_url: string | null;
   tempo: number;
   key_sig: string;
   time_signature: string;
@@ -23,6 +24,8 @@ export default function ScoreLibrary() {
   const [title, setTitle] = useState('');
   const [composer, setComposer] = useState('');
   const [file, setFile] = useState<File | null>(null);
+  const [externalUrl, setExternalUrl] = useState('');
+  const [uploadMode, setUploadMode] = useState<'file' | 'link'>('file');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
 
@@ -38,7 +41,6 @@ export default function ScoreLibrary() {
       const reader = new FileReader();
       reader.onload = () => {
         const result = reader.result as string;
-        // Remove data URL prefix (e.g., "data:application/pdf;base64,")
         const base64 = result.split(',')[1];
         resolve(base64);
       };
@@ -47,7 +49,7 @@ export default function ScoreLibrary() {
     });
   };
 
-  const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB limit for base64 upload
+  const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB limit
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,28 +60,30 @@ export default function ScoreLibrary() {
       let fileData = null;
       let fileName = null;
       let fileType = null;
+      let extUrl = null;
 
-      if (file) {
-        // Check file size - if too large, only store metadata
+      if (uploadMode === 'file' && file) {
+        // Check file size - if too large, skip file content
         if (file.size > MAX_FILE_SIZE) {
           fileName = file.name;
           fileType = file.type;
-          // fileData stays null - backend will create record without file content
         } else {
           fileData = await fileToBase64(file);
           fileName = file.name;
           fileType = file.type;
         }
+      } else if (uploadMode === 'link' && externalUrl.trim()) {
+        extUrl = externalUrl.trim();
       }
 
       const res = await fetch(`${API_BASE}/api/scores`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, composer, fileData, fileName, fileType }),
+        body: JSON.stringify({ title, composer, fileData, fileName, fileType, externalUrl: extUrl }),
       });
 
       if (res.status === 413) {
-        throw new Error('文件太大（超过2MB）。已保存谱子信息，文件未上传。如需上传大文件，建议压缩后重试。');
+        throw new Error('文件太大。已保存谱子信息，文件未上传。建议用"网盘链接"方式上传大文件。');
       }
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -87,7 +91,7 @@ export default function ScoreLibrary() {
       }
 
       setShowUpload(false);
-      setTitle(''); setComposer(''); setFile(null);
+      setTitle(''); setComposer(''); setFile(null); setExternalUrl(''); setUploadMode('file');
       fetchScores();
     } catch (err: any) {
       setUploadError(err.message || '上传失败');
@@ -104,7 +108,7 @@ export default function ScoreLibrary() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-3">
         <div>
           <h2 className="text-2xl font-bold">我的谱子库</h2>
-          <p className="text-sm text-neutral-500 mt-1">上传PDF或图片格式的合唱谱</p>
+          <p className="text-sm text-neutral-500 mt-1">上传谱子或直接贴网盘链接</p>
         </div>
         <button onClick={() => setShowUpload(true)}
           className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-black font-medium px-4 py-2.5 rounded-lg">
@@ -126,7 +130,12 @@ export default function ScoreLibrary() {
                 <div className="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center">
                   <Music className="w-6 h-6 text-amber-400" />
                 </div>
-                <span className="text-xs text-neutral-600 bg-neutral-800 px-2 py-1 rounded">{s.time_signature}</span>
+                <div className="flex flex-col items-end gap-1">
+                  <span className="text-xs text-neutral-600 bg-neutral-800 px-2 py-1 rounded">{s.time_signature}</span>
+                  {s.external_url && (
+                    <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">网盘</span>
+                  )}
+                </div>
               </div>
               <h3 className="font-semibold mb-1 group-hover:text-amber-400 transition-colors">{s.title}</h3>
               <p className="text-sm text-neutral-500 mb-2">{s.composer || '未知作曲家'}</p>
@@ -136,7 +145,7 @@ export default function ScoreLibrary() {
                 <span>{s.total_measures}小节</span>
               </div>
               <div className="flex gap-2">
-                {s.file_path && (
+                {(s.file_path || s.external_url) && (
                   <button onClick={() => setPreview(s)}
                     className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-neutral-800 rounded-lg text-xs text-neutral-300 hover:bg-neutral-700 transition-colors">
                     <Eye className="w-3.5 h-3.5" />预览
@@ -160,6 +169,21 @@ export default function ScoreLibrary() {
               <h3 className="font-semibold text-lg">上传谱子</h3>
               <button onClick={() => setShowUpload(false)} className="text-neutral-500 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
+
+            {/* Upload mode toggle */}
+            <div className="flex gap-2 mb-4">
+              <button
+                onClick={() => setUploadMode('file')}
+                className={`flex-1 py-2 rounded-lg text-sm ${uploadMode === 'file' ? 'bg-amber-500/15 text-amber-400' : 'bg-neutral-800 text-neutral-400'}`}>
+                <Upload className="w-4 h-4 inline mr-1" />上传文件
+              </button>
+              <button
+                onClick={() => setUploadMode('link')}
+                className={`flex-1 py-2 rounded-lg text-sm ${uploadMode === 'link' ? 'bg-blue-500/15 text-blue-400' : 'bg-neutral-800 text-neutral-400'}`}>
+                <LinkIcon className="w-4 h-4 inline mr-1" />网盘链接
+              </button>
+            </div>
+
             <form onSubmit={handleUpload} className="space-y-4">
               <div>
                 <label className="block text-sm text-neutral-400 mb-1.5">曲目标题 *</label>
@@ -171,23 +195,42 @@ export default function ScoreLibrary() {
                 <input type="text" value={composer} onChange={e => setComposer(e.target.value)} placeholder="例如：约翰·庞德·奥特威"
                   className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-amber-500" />
               </div>
-              <div>
-                <label className="block text-sm text-neutral-400 mb-1.5">谱子文件（PDF或图片）</label>
-                <label className="border-2 border-dashed border-neutral-700 rounded-lg p-6 text-center cursor-pointer hover:border-amber-500/50 transition-colors block">
-                  <Upload className="w-6 h-6 text-neutral-500 mx-auto mb-2" />
-                  <p className="text-sm text-neutral-400">{file ? file.name : '点击上传文件'}</p>
-                  <p className="text-xs text-neutral-600 mt-1">支持：PDF、图片、音频(mp3/wav)</p>
-                  <p className="text-xs text-amber-500/70 mt-1">⚠ 超过2MB的文件将只保存信息，不上传文件内容</p>
-                  {file && file.size > MAX_FILE_SIZE && (
-                    <p className="text-xs text-amber-400 mt-1">此文件 { (file.size / 1024 / 1024).toFixed(1) }MB 超过限制，将只保存谱子信息</p>
-                  )}
-                  <input type="file" accept=".pdf,.png,.jpg,.jpeg,.mp3,.wav,.m4a" onChange={e => setFile(e.target.files?.[0] || null)} className="hidden" />
-                </label>
-              </div>
+
+              {uploadMode === 'file' ? (
+                <div>
+                  <label className="block text-sm text-neutral-400 mb-1.5">谱子文件（PDF或图片）</label>
+                  <label className="border-2 border-dashed border-neutral-700 rounded-lg p-6 text-center cursor-pointer hover:border-amber-500/50 transition-colors block">
+                    <Upload className="w-6 h-6 text-neutral-500 mx-auto mb-2" />
+                    <p className="text-sm text-neutral-400">{file ? file.name : '点击上传文件'}</p>
+                    <p className="text-xs text-neutral-600 mt-1">支持：PDF、图片、音频(mp3/wav)</p>
+                    <p className="text-xs text-amber-500/70 mt-1">⚠ 超过2MB的文件将只保存信息，不上传文件内容</p>
+                    {file && file.size > MAX_FILE_SIZE && (
+                      <p className="text-xs text-amber-400 mt-1">此文件 { (file.size / 1024 / 1024).toFixed(1) }MB 超过限制，建议用"网盘链接"方式</p>
+                    )}
+                    <input type="file" accept=".pdf,.png,.jpg,.jpeg,.mp3,.wav,.m4a" onChange={e => setFile(e.target.files?.[0] || null)} className="hidden" />
+                  </label>
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-sm text-neutral-400 mb-1.5">
+                    <LinkIcon className="w-3.5 h-3.5 inline mr-1" />网盘分享链接
+                  </label>
+                  <input
+                    type="url"
+                    value={externalUrl}
+                    onChange={e => setExternalUrl(e.target.value)}
+                    placeholder="粘贴百度网盘/阿里云盘/腾讯微云等分享链接"
+                    className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-500"
+                  />
+                  <p className="text-xs text-neutral-500 mt-1">支持任意网盘链接，点击预览将跳转到对应网盘</p>
+                  <p className="text-xs text-blue-400/70 mt-1">💡 推荐：百度网盘、阿里云盘、腾讯微云</p>
+                </div>
+              )}
+
               {uploadError && (
                 <div className="text-xs text-red-400 bg-red-500/10 rounded-lg p-2 text-center">{uploadError}</div>
               )}
-              <button type="submit" disabled={uploading || !title}
+              <button type="submit" disabled={uploading || !title || (uploadMode === 'link' && !externalUrl.trim())}
                 className="w-full bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-black font-medium py-2.5 rounded-lg">
                 {uploading ? '上传中...' : '确认上传'}
               </button>
@@ -197,7 +240,7 @@ export default function ScoreLibrary() {
       )}
 
       {/* Preview Modal */}
-      {preview && preview.file_path && (
+      {preview && (preview.file_path || preview.external_url) && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-neutral-900 rounded-2xl border border-neutral-800 w-full max-w-4xl h-[80vh] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b border-neutral-800">
@@ -208,7 +251,23 @@ export default function ScoreLibrary() {
               <button onClick={() => setPreview(null)} className="text-neutral-500 hover:text-white"><X className="w-5 h-5" /></button>
             </div>
             <div className="flex-1 overflow-auto p-4 bg-neutral-950">
-              {isPdf(preview.file_path) ? (
+              {/* External link preview */}
+              {preview.external_url ? (
+                <div className="flex flex-col items-center justify-center h-full">
+                  <LinkIcon className="w-12 h-12 text-blue-400 mb-4" />
+                  <p className="text-sm text-neutral-400 mb-2">文件存储在外部网盘</p>
+                  <p className="text-xs text-neutral-600 mb-6 max-w-md text-center break-all">{preview.external_url}</p>
+                  <a
+                    href={preview.external_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center gap-2 px-6 py-3 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    在网盘打开
+                  </a>
+                </div>
+              ) : isPdf(preview.file_path) ? (
                 <embed src={`${API_BASE}${preview.file_path}`} type="application/pdf" width="100%" height="100%" />
               ) : isImage(preview.file_path) ? (
                 <img src={`${API_BASE}${preview.file_path}`} alt={preview.title} className="max-w-full mx-auto" />
