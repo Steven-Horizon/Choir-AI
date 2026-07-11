@@ -489,45 +489,65 @@ function callKimi(msgs, apiKey) {
 }
 
 app.post('/api/chat', async (req, res) => {
-  const { message, sessionId, useKimi, attachments, kimiKey } = req.body;
+  const { message, sessionId, forceModel, attachments, kimiKey } = req.body;
   if (!message) return res.status(400).json({ error: 'Message required' });
 
   const sid = sessionId || Date.now();
   const history = messages.filter(m => m.session_id === sid);
 
+  // Determine which model to use:
+  // 1. If user forces a model, use that
+  // 2. If there are image attachments AND Kimi key is available, use Kimi
+  // 3. Otherwise use DeepSeek (default)
+  const effectiveKimiKey = kimiKey || KIMI_API_KEY;
+  const hasImageAttachments = attachments && attachments.some((a) => a.type && a.type.startsWith('image/'));
+
+  let useKimiApi = false;
+  if (forceModel === 'kimi' && effectiveKimiKey) {
+    useKimiApi = true;
+  } else if (forceModel === 'deepseek') {
+    useKimiApi = false;
+  } else {
+    // Auto: use Kimi if images present and key available, else DeepSeek
+    useKimiApi = hasImageAttachments && !!effectiveKimiKey;
+  }
+
   // Build messages
   const msgs = [{ role: 'system', content: '你是 ChoirAI 合唱智能训练助手，擅长合唱训练指导、乐理知识、谱面分析、声部协调。' }];
   history.forEach(h => msgs.push({ role: h.role, content: h.content }));
 
-  // Check Kimi key: from request body > env var
-  const effectiveKimiKey = kimiKey || KIMI_API_KEY;
-  // If Kimi is requested and API key is available, use Kimi (supports images)
-  const useKimiApi = useKimi && effectiveKimiKey;
-
-  if (useKimiApi && attachments && attachments.length > 0) {
-    // Kimi supports multimodal input
+  if (useKimiApi && hasImageAttachments) {
+    // Kimi multimodal: send text + images
     const contentParts = [];
     contentParts.push({ type: 'text', text: message });
     attachments.forEach(att => {
       if (att.type && att.type.startsWith('image/')) {
         contentParts.push({ type: 'image_url', image_url: { url: `data:${att.type};base64,${att.data}` } });
-      } else {
-        contentParts.push({ type: 'text', text: `[附件: ${att.name || '文件'}]` });
       }
     });
     msgs.push({ role: 'user', content: contentParts });
   } else {
-    msgs.push({ role: 'user', content: message });
+    // DeepSeek or Kimi without images: just text
+    let finalMessage = message;
+    // If there are non-image attachments, mention them in text
+    if (attachments && attachments.length > 0) {
+      const nonImageNames = attachments.filter(a => !a.type.startsWith('image/')).map(a => a.name).join(', ');
+      if (nonImageNames) finalMessage += `\n[附件: ${nonImageNames}]`;
+    }
+    msgs.push({ role: 'user', content: finalMessage });
   }
 
   messages.push({ session_id: sid, role: 'user', content: message, created_at: new Date().toISOString() });
 
   try {
     let aiContent;
+    let usedModel = 'deepseek';
+
     if (useKimiApi) {
+      usedModel = 'kimi';
       aiContent = await callKimi(msgs, effectiveKimiKey);
     } else {
-      // Fallback to DeepSeek
+      // DeepSeek
       const postData = JSON.stringify({ model: 'deepseek-chat', messages: msgs, temperature: 0.7, max_tokens: 2048 });
       aiContent = await new Promise((resolve, reject) => {
         const req = https.request({ hostname: 'api.deepseek.com', path: '/chat/completions', method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${DEEPSEEK_API_KEY}`, 'Content-Length': Buffer.byteLength(postData) }, timeout: 30000 }, (res) => { let data = ''; res.on('data', chunk => data += chunk); res.on('end', () => { try { const p = JSON.parse(data); if (p.choices?.[0]) resolve(p.choices[0].message.content); else reject(new Error('No response')); } catch(e) { reject(e); } }); });
@@ -536,9 +556,12 @@ app.post('/api/chat', async (req, res) => {
       });
     }
     messages.push({ session_id: sid, role: 'assistant', content: aiContent, created_at: new Date().toISOString() });
-    res.json({ sessionId: sid, content: aiContent });
-  } catch {
-    const fallback = '抱歉，AI服务暂时不可用。请稍后重试。';
+    res.json({ sessionId: sid, content: aiContent, model: usedModel });
+  } catch (err) {
+    console.error('Chat error:', err);
+    const fallback = useKimiApi
+      ? 'Kimi 服务暂时不可用。已自动切换到 DeepSeek，但图片分析功能不可用。'
+      : '抱歉，AI服务暂时不可用。请稍后重试。';
     messages.push({ session_id: sid, role: 'assistant', content: fallback, created_at: new Date().toISOString() });
     res.json({ sessionId: sid, content: fallback, _fallback: true });
   }
