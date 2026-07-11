@@ -239,31 +239,18 @@ function callDeepSeek(msgs) {
 }
 
 app.post('/api/chat', async (req, res) => {
-  const { message, sessionId, attachments } = req.body;
-  if (!message && (!attachments || attachments.length === 0)) return res.status(400).json({ error: 'Message or attachments required' });
+  const { message, sessionId } = req.body;
+  if (!message) return res.status(400).json({ error: 'Message required' });
 
   const sid = sessionId || Date.now();
   const history = messages.filter(m => m.session_id === sid);
-  let userContent = message || '';
-  const msgs = [{ role: 'system', content: '你是 ChoirAI 合唱智能训练助手，擅长合唱训练指导、乐理知识、谱面分析、声部协调。' }];
-  history.forEach(h => msgs.push({ role: h.role, content: h.content }));
+  const msgs = [
+    { role: 'system', content: '你是 ChoirAI 合唱智能训练助手，擅长合唱训练指导、乐理知识、谱面分析、声部协调。' },
+    ...history.map(h => ({ role: h.role, content: h.content })),
+    { role: 'user', content: message },
+  ];
 
-  if (attachments && attachments.length > 0) {
-    const contentParts = [];
-    if (userContent) contentParts.push({ type: 'text', text: userContent });
-    attachments.forEach(att => {
-      if (att.type && att.type.startsWith('image/')) {
-        contentParts.push({ type: 'image_url', image_url: { url: `data:${att.type};base64,${att.data}` } });
-      } else {
-        contentParts.push({ type: 'text', text: `[附件: ${att.name || '文件'}]` });
-      }
-    });
-    msgs.push({ role: 'user', content: contentParts });
-  } else {
-    msgs.push({ role: 'user', content: userContent });
-  }
-
-  messages.push({ session_id: sid, role: 'user', content: userContent, created_at: new Date().toISOString() });
+  messages.push({ session_id: sid, role: 'user', content: message, created_at: new Date().toISOString() });
 
   try {
     const aiContent = await callDeepSeek(msgs);

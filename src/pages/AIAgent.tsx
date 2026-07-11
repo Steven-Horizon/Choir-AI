@@ -214,13 +214,20 @@ export default function AIAgent() {
 
     setLoading(true);
     try {
+      // DeepSeek V3 doesn't support image input, so we append a note about attachments
+      let messageToSend = content;
+      if (sentAttachments.length > 0) {
+        const attNames = sentAttachments.map(a => a.name).join(', ');
+        const attNote = `\n[用户上传了文件: ${attNames}。注意：AI暂不支持直接分析图片/PDF内容，请用文字描述你想问的问题。]`;
+        messageToSend = (messageToSend || '请帮我分析以下文件') + attNote;
+      }
+
       const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: content,
+          message: messageToSend,
           sessionId: sid,
-          attachments: sentAttachments.map(a => ({ name: a.name, type: a.type, data: a.data })),
         }),
       });
       if (!res.ok) throw new Error('API failed');

@@ -216,7 +216,7 @@ export default function ScoreLibrary() {
                     <LinkIcon className="w-3.5 h-3.5 inline mr-1" />网盘分享链接
                   </label>
                   <input
-                    type="url"
+                    type="text"
                     value={externalUrl}
                     onChange={e => setExternalUrl(e.target.value)}
                     placeholder="粘贴百度网盘/阿里云盘/腾讯微云等分享链接"
