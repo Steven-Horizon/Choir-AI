@@ -11,9 +11,9 @@ interface Plan {
   startDate: string;
   endDate: string;
   phases: Phase[];
-  source: 'self' | 'imported';
-  fromPart?: string;
-  memberProgress?: Record<string, number>;
+  creator: string;
+  createdAt: string;
+  source?: 'imported';
 }
 
 interface Phase {
@@ -24,32 +24,17 @@ interface Phase {
 
 const PART_NAMES: Record<string, string> = { soprano: '女高音', alto: '女低音', tenor: '男高音', bass: '男低音' };
 
-function getUserKey(): string {
-  try { const u = JSON.parse(localStorage.getItem('choir_user') || '{}'); return u.id || 'guest'; } catch { return 'guest'; }
-}
 function getUserName(): string {
   try { const u = JSON.parse(localStorage.getItem('choir_user') || '{}'); return u.name || '我'; } catch { return '我'; }
 }
-function loadPlans(): Plan[] {
-  try { return JSON.parse(localStorage.getItem(`choir_plans_${getUserKey()}`) || '[]'); } catch { return []; }
-}
-function savePlans(plans: Plan[]) { localStorage.setItem(`choir_plans_${getUserKey()}`, JSON.stringify(plans)); }
-
-// Shared plans storage (simulating server-side sharing)
-function saveSharedPlan(plan: Plan) {
-  const shared = JSON.parse(localStorage.getItem('choir_shared_plans') || '[]');
-  shared.push({ ...plan, sharedAt: Date.now() });
-  localStorage.setItem('choir_shared_plans', JSON.stringify(shared));
-}
-function getSharedPlans(): Plan[] {
-  return JSON.parse(localStorage.getItem('choir_shared_plans') || '[]');
-}
 
 export default function TrainingPlans() {
-  const [plans, setPlans] = useState<Plan[]>(loadPlans);
+  const [plans, setPlans] = useState<Plan[]>([]);
   const [view, setView] = useState<'list' | 'create' | 'detail' | 'import'>('list');
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
   const [scores, setScores] = useState<Array<{ id: number; title: string }>>([]);
+  const [sharedPlans, setSharedPlans] = useState<Plan[]>([]);
+  const [loading, setLoading] = useState(false);
 
   // Create form
   const [step, setStep] = useState(1);
@@ -60,14 +45,46 @@ export default function TrainingPlans() {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  // Import
-  const [sharedPlans, setSharedPlans] = useState<Plan[]>([]);
+  const userName = getUserName();
 
-  useEffect(() => { setPlans(loadPlans()); }, []);
-  useEffect(() => { savePlans(plans); }, [plans]);
-  useEffect(() => { fetch(`${API_BASE}/api/scores`).then(r => r.json()).then(d => setScores(d)); }, []);
+  useEffect(() => { fetchPlans(); fetchScores(); }, []);
 
-  const togglePart = (p: string) => { setSelectedParts(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]); };
+  const fetchPlans = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/plans`);
+      if (res.ok) {
+        const data = await res.json();
+        // Mark plans created by others as imported for display
+        const processed = data.map((p: any) => ({
+          ...p,
+          source: p.creator !== userName ? 'imported' as const : undefined,
+        }));
+        setPlans(processed);
+      }
+    } catch (e) { console.error('Failed to fetch plans:', e); }
+  };
+
+  const fetchScores = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/scores`);
+      if (res.ok) setScores(await res.json());
+    } catch (e) { console.error('Failed to fetch scores:', e); }
+  };
+
+  const fetchSharedPlans = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/plans`);
+      if (res.ok) {
+        const data = await res.json();
+        // Only show plans NOT created by current user
+        setSharedPlans(data.filter((p: any) => p.creator !== userName));
+      }
+    } catch (e) { console.error('Failed to fetch shared plans:', e); }
+  };
+
+  const togglePart = (p: string) => {
+    setSelectedParts(prev => prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]);
+  };
 
   const generatePhases = (scoreName: string, parts: string[]): Phase[] => [
     { name: '基础熟悉期', goal: '熟悉旋律，能跟唱自己的声部', tasks: [{ text: `慢速(60BPM)跟唱${scoreName} 3遍`, done: false }, { text: '使用音高检测，确保偏差<50音分', done: false }, { text: `重点练习第1-4小节（${parts.map(p => PART_NAMES[p]).join('、')}）`, done: false }] },
@@ -76,28 +93,43 @@ export default function TrainingPlans() {
     { name: '合排准备期', goal: '达到合排水平', tasks: [{ text: '模拟合排环境', done: false }, { text: '关注进拍和呼吸点', done: false }, { text: '准备考核', done: false }] },
   ];
 
-  const generatePlan = () => {
+  const generatePlan = async () => {
     if (!selectedScore || selectedParts.length === 0) return;
-    const plan: Plan = {
-      id: 'plan_' + Date.now(), title: `${selectedScoreName} 训练计划`, scoreName: selectedScoreName,
-      parts: selectedParts, startDate: startDate || new Date().toLocaleDateString(),
-      endDate: endDate || new Date(Date.now() + days * 86400000).toLocaleDateString(),
-      phases: generatePhases(selectedScoreName, selectedParts), source: 'self',
-    };
-    const updated = [plan, ...plans]; setPlans(updated); savePlans(updated);
-    // Auto-share so others can import
-    saveSharedPlan(plan);
-    resetCreate(); setView('list');
+    setLoading(true);
+    try {
+      const planData = {
+        title: `${selectedScoreName} 训练计划`,
+        scoreName: selectedScoreName,
+        parts: selectedParts,
+        startDate: startDate || new Date().toLocaleDateString(),
+        endDate: endDate || new Date(Date.now() + days * 86400000).toLocaleDateString(),
+        phases: generatePhases(selectedScoreName, selectedParts),
+        creator: userName,
+      };
+      const res = await fetch(`${API_BASE}/api/plans`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(planData),
+      });
+      if (res.ok) {
+        resetCreate();
+        await fetchPlans();
+        setView('list');
+      }
+    } catch (e) { console.error('Failed to create plan:', e); }
+    setLoading(false);
   };
 
-  const importPlan = (plan: Plan) => {
-    const imported: Plan = { ...plan, id: 'plan_' + Date.now(), source: 'imported', fromPart: plan.parts.map(p => PART_NAMES[p]).join('、') };
-    const updated = [imported, ...plans]; setPlans(updated); savePlans(updated); setView('list');
+  const importPlan = async (plan: Plan) => {
+    // Import just means the user acknowledges it - it already exists in shared list
+    // Just refresh to see it
+    await fetchPlans();
+    setView('list');
   };
 
   const resetCreate = () => { setStep(1); setSelectedScore(''); setSelectedScoreName(''); setSelectedParts([]); setDays(14); setStartDate(''); setEndDate(''); };
 
-  const toggleTask = (planId: string, phaseIdx: number, taskIdx: number) => {
+  const toggleTask = async (planId: string, phaseIdx: number, taskIdx: number) => {
     setPlans(plans.map(plan => {
       if (plan.id !== planId) return plan;
       const newPhases = [...plan.phases];
@@ -106,7 +138,15 @@ export default function TrainingPlans() {
     }));
   };
 
-  const deletePlan = (id: string) => { setPlans(plans.filter(p => p.id !== id)); if (selectedPlan?.id === id) { setSelectedPlan(null); setView('list'); } };
+  const deletePlan = async (id: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/plans/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        setPlans(plans.filter(p => p.id !== id));
+        if (selectedPlan?.id === id) { setSelectedPlan(null); setView('list'); }
+      }
+    } catch (e) { console.error('Failed to delete plan:', e); }
+  };
 
   const progress = (plan: Plan) => {
     const total = plan.phases.reduce((s, p) => s + p.tasks.length, 0);
@@ -123,13 +163,13 @@ export default function TrainingPlans() {
             <Link to="/" className="text-neutral-500 hover:text-white"><ArrowLeft className="w-5 h-5" /></Link>
             <div>
               <h2 className="text-2xl font-bold">训练计划</h2>
-              <p className="text-sm text-neutral-500">制定或导入训练计划，追踪团队进度</p>
+              <p className="text-sm text-neutral-500">制定训练计划，跨设备共享给声部成员</p>
             </div>
           </div>
           <div className="flex gap-2">
-            <button onClick={() => { setSharedPlans(getSharedPlans()); setView('import'); }}
+            <button onClick={() => { fetchSharedPlans(); setView('import'); }}
               className="flex items-center gap-2 px-4 py-2.5 bg-neutral-800 rounded-lg text-sm text-neutral-300 hover:bg-neutral-700">
-              <Download className="w-4 h-4" />导入计划
+              <Download className="w-4 h-4" />发现计划
             </button>
             <button onClick={() => setView('create')}
               className="flex items-center gap-2 px-4 py-2.5 bg-amber-500 text-black font-medium rounded-lg hover:bg-amber-600">
@@ -145,7 +185,7 @@ export default function TrainingPlans() {
             <div className="flex gap-2 justify-center mt-3">
               <button onClick={() => setView('create')} className="text-amber-400 text-sm hover:text-amber-300">创建一个</button>
               <span className="text-neutral-600">或</span>
-              <button onClick={() => { setSharedPlans(getSharedPlans()); setView('import'); }} className="text-blue-400 text-sm hover:text-blue-300">从声部导入</button>
+              <button onClick={() => { fetchSharedPlans(); setView('import'); }} className="text-blue-400 text-sm hover:text-blue-300">发现他人分享的计划</button>
             </div>
           </div>
         ) : (
@@ -158,7 +198,8 @@ export default function TrainingPlans() {
                   <div className="flex items-center justify-between mb-2">
                     <div className="flex items-center gap-2">
                       <h3 className="font-semibold">{plan.title}</h3>
-                      {plan.source === 'imported' && <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded">已导入</span>}
+                      {plan.source === 'imported' && <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded">来自 {plan.creator}</span>}
+                      {plan.creator === userName && <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded">我创建的</span>}
                     </div>
                     <span className={`text-xs px-2 py-1 rounded ${pct === 100 ? 'bg-green-500/20 text-green-400' : 'bg-amber-500/10 text-amber-400'}`}>{pct === 100 ? '已完成' : `${pct}%`}</span>
                   </div>
@@ -186,8 +227,8 @@ export default function TrainingPlans() {
         <div className="flex flex-col sm:flex-row sm:items-center gap-4 mb-6">
           <button onClick={() => setView('list')} className="text-neutral-500 hover:text-white"><ArrowLeft className="w-5 h-5" /></button>
           <div>
-            <h2 className="text-xl font-bold">导入训练计划</h2>
-            <p className="text-sm text-neutral-500">从声部长分享的计划中导入</p>
+            <h2 className="text-xl font-bold">发现训练计划</h2>
+            <p className="text-sm text-neutral-500">其他人创建并分享的训练计划</p>
           </div>
         </div>
 
@@ -195,21 +236,22 @@ export default function TrainingPlans() {
           <div className="text-center py-20 bg-neutral-900 rounded-xl border border-neutral-800 border-dashed">
             <Download className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
             <p className="text-neutral-500">暂无可导入的计划</p>
-            <p className="text-sm text-neutral-600 mt-1">让声部长在"训练计划"页面创建计划后，你就能在这里看到</p>
+            <p className="text-sm text-neutral-600 mt-1">等其他人创建计划后就能在这里看到</p>
           </div>
         ) : (
           <div className="space-y-3">
-            {sharedPlans.map((plan, i) => (
-              <div key={i} className="bg-neutral-900 rounded-xl border border-neutral-800 p-5">
+            {sharedPlans.map(plan => (
+              <div key={plan.id} className="bg-neutral-900 rounded-xl border border-neutral-800 p-5">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="font-semibold">{plan.title}</h3>
                   <span className="text-xs bg-purple-500/20 text-purple-400 px-2 py-1 rounded">{plan.parts.map(p => PART_NAMES[p]).join('、')}</span>
                 </div>
-                <p className="text-sm text-neutral-500 mb-3">
+                <p className="text-sm text-neutral-500 mb-1">
                   <Music className="w-3.5 h-3.5 inline" /> {plan.scoreName} ·
                   <Calendar className="w-3.5 h-3.5 inline ml-1" /> {plan.startDate} - {plan.endDate} ·
                   {plan.phases.reduce((s, p) => s + p.tasks.length, 0)} 个任务
                 </p>
+                <p className="text-xs text-neutral-600 mb-3">创建者: {plan.creator}</p>
                 <button onClick={() => importPlan(plan)}
                   className="flex items-center gap-2 px-4 py-2 bg-blue-500/15 text-blue-400 rounded-lg text-sm hover:bg-blue-500/25">
                   <Download className="w-4 h-4" />导入到我的计划
@@ -284,7 +326,10 @@ export default function TrainingPlans() {
             </div>
             <div className="flex gap-2">
               <button onClick={() => setStep(2)} className="flex-1 py-3 bg-neutral-800 rounded-lg text-sm text-neutral-300 hover:bg-neutral-700">上一步</button>
-              <button onClick={generatePlan} className="flex-1 py-3 bg-amber-500 text-black font-medium rounded-lg hover:bg-amber-600">生成计划</button>
+              <button onClick={generatePlan} disabled={loading}
+                className="flex-1 py-3 bg-amber-500 text-black font-medium rounded-lg hover:bg-amber-600 disabled:opacity-50">
+                {loading ? '生成中...' : '生成计划'}
+              </button>
             </div>
           </div>
         )}
@@ -303,7 +348,8 @@ export default function TrainingPlans() {
           <div>
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-bold">{selectedPlan.title}</h2>
-              {selectedPlan.source === 'imported' && <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded">已导入</span>}
+              {selectedPlan.source === 'imported' && <span className="text-xs bg-blue-500/20 text-blue-400 px-2 py-0.5 rounded">来自 {selectedPlan.creator}</span>}
+              {selectedPlan.creator === userName && <span className="text-xs bg-green-500/20 text-green-400 px-2 py-0.5 rounded">我创建的</span>}
             </div>
             <p className="text-xs text-neutral-500">
               <Music className="w-3 h-3 inline" /> {selectedPlan.scoreName} ·
@@ -314,7 +360,9 @@ export default function TrainingPlans() {
         </div>
         <div className="flex items-center gap-2">
           <span className={`text-xs px-2 py-1 rounded ${pct === 100 ? 'bg-green-500/20 text-green-400' : 'bg-amber-500/10 text-amber-400'}`}>{pct}%</span>
-          <button onClick={() => deletePlan(selectedPlan.id)} className="text-neutral-500 hover:text-red-400"><Trash2 className="w-4 h-4" /></button>
+          {selectedPlan.creator === userName && (
+            <button onClick={() => deletePlan(selectedPlan.id)} className="text-neutral-500 hover:text-red-400"><Trash2 className="w-4 h-4" /></button>
+          )}
         </div>
       </div>
 
@@ -323,7 +371,7 @@ export default function TrainingPlans() {
         <div className="flex items-center gap-2 mb-2">
           <TrendingUp className="w-4 h-4 text-amber-400" />
           <span className="text-sm font-medium">我的完成进度</span>
-          <span className="text-xs text-neutral-500 ml-auto">{getUserName()}</span>
+          <span className="text-xs text-neutral-500 ml-auto">{userName}</span>
         </div>
         <div className="h-2 bg-neutral-800 rounded-full overflow-hidden">
           <div className="h-full bg-amber-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
