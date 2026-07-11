@@ -11,6 +11,7 @@ interface Score {
   file_path: string | null;
   external_url: string | null;
   midi_parsed: boolean;
+  musicxml_parsed: boolean;
   tempo: number;
   key_sig: string;
   time_signature: string;
@@ -30,10 +31,27 @@ export default function ScoreLibrary() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
 
-  useEffect(() => { fetchScores(); }, []);
+  // Load from localStorage first (instant), then fetch from server
+  useEffect(() => {
+    const cached = localStorage.getItem('choir_scores_cache');
+    if (cached) {
+      try { setScores(JSON.parse(cached)); } catch { /* ignore */ }
+    }
+    fetchScores();
+  }, []);
 
   const fetchScores = () => {
-    fetch(`${API_BASE}/api/scores`).then(r => r.json()).then(setScores);
+    fetch(`${API_BASE}/api/scores`).then(r => r.json()).then(data => {
+      setScores(data);
+      // Save to localStorage for persistence across refreshes
+      localStorage.setItem('choir_scores_cache', JSON.stringify(data));
+    }).catch(() => {
+      // If server fails, keep localStorage cache
+      const cached = localStorage.getItem('choir_scores_cache');
+      if (cached && scores.length === 0) {
+        try { setScores(JSON.parse(cached)); } catch { /* ignore */ }
+      }
+    });
   };
 
   // Convert file to base64
@@ -136,6 +154,9 @@ export default function ScoreLibrary() {
                   {s.midi_parsed && (
                     <span className="text-[10px] bg-purple-500/20 text-purple-400 px-1.5 py-0.5 rounded">MIDI</span>
                   )}
+                  {s.musicxml_parsed && (
+                    <span className="text-[10px] bg-green-500/20 text-green-400 px-1.5 py-0.5 rounded">五线谱</span>
+                  )}
                   {s.external_url && (
                     <span className="text-[10px] bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">网盘</span>
                   )}
@@ -155,9 +176,9 @@ export default function ScoreLibrary() {
                     <Eye className="w-3.5 h-3.5" />预览
                   </button>
                 )}
-                <Link to={`/rehearse/${s.id}`}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-amber-500/10 rounded-lg text-xs text-amber-400 hover:bg-amber-500/20 transition-colors text-center">
-                  <Music className="w-3.5 h-3.5" />排练
+                <Link to={`/sheet/${s.id}`}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 bg-green-500/10 rounded-lg text-xs text-green-400 hover:bg-green-500/20 transition-colors text-center">
+                  <Music className="w-3.5 h-3.5" />五线谱
                 </Link>
               </div>
             </div>
@@ -289,10 +310,10 @@ export default function ScoreLibrary() {
               )}
             </div>
             <div className="p-4 border-t border-neutral-800 flex gap-2">
-              <Link to={`/rehearse/${preview.id}`}
-                className="flex-1 text-center py-2 bg-amber-500 text-black font-medium rounded-lg hover:bg-amber-600"
+              <Link to={`/sheet/${preview.id}`}
+                className="flex-1 text-center py-2 bg-green-500 text-black font-medium rounded-lg hover:bg-green-600"
                 onClick={() => setPreview(null)}>
-                进入排练
+                查看五线谱
               </Link>
               <button onClick={() => setPreview(null)} className="px-4 py-2 bg-neutral-800 rounded-lg text-sm text-neutral-300 hover:bg-neutral-700">
                 关闭

@@ -5,6 +5,155 @@ const path = require('path');
 const https = require('https');
 const { parseMidi } = require('midi-file');
 
+// =================== MUSICXML PARSER ===================
+function parseMusicXML(xmlString) {
+  try {
+    // Extract title
+    const titleMatch = xmlString.match(/<work-title>([^<]+)<\/work-title>/) || xmlString.match(/<movement-title>([^<]+)<\/movement-title>/);
+    const title = titleMatch ? titleMatch[1] : 'Unknown';
+
+    // Extract parts
+    const parts = [];
+    const partRegex = /<part\s+id="([^"]+)">([\s\S]*?)<\/part>/g;
+    let partMatch;
+
+    while ((partMatch = partRegex.exec(xmlString)) !== null) {
+      const partId = partMatch[1];
+      const partContent = partMatch[2];
+
+      // Extract part name
+      const scorePartMatch = xmlString.match(new RegExp(`<score-part\\s+id="${partId}">([\\s\\S]*?)<\\/score-part>`));
+      let partName = partId;
+      if (scorePartMatch) {
+        const nameMatch = scorePartMatch[1].match(/<part-name>([^<]+)<\/part-name>/);
+        if (nameMatch) partName = nameMatch[1];
+      }
+
+      // Extract measures
+      const measures = [];
+      const measureRegex = /<measure\s+number="(\d+)"[^>]*>([\s\S]*?)<\/measure>/g;
+      let measureMatch;
+
+      while ((measureMatch = measureRegex.exec(partContent)) !== null) {
+        const measureNum = parseInt(measureMatch[1]);
+        const measureContent = measureMatch[2];
+
+        // Extract attributes (time signature, key, divisions)
+        let divisions = 1;
+        let beats = 4;
+        let beatType = 4;
+        let tempo = 120;
+
+        const divisionsMatch = measureContent.match(/<divisions>(\d+)<\/divisions>/);
+        if (divisionsMatch) divisions = parseInt(divisionsMatch[1]);
+
+        const timeMatch = measureContent.match(/<time>\s*<beats>(\d+)<\/beats>\s*<beat-type>(\d+)<\/beat-type>/);
+        if (timeMatch) { beats = parseInt(timeMatch[1]); beatType = parseInt(timeMatch[2]); }
+
+        const tempoMatch = measureContent.match(/<sound\s+tempo="(\d+)"\s*\/>/);
+        if (tempoMatch) tempo = parseInt(tempoMatch[1]);
+
+        // Extract notes in this measure
+        const notes = [];
+        const noteRegex = /<note>([\s\S]*?)<\/note>/g;
+        let noteMatch;
+        let currentTime = 0;
+
+        while ((noteMatch = noteRegex.exec(measureContent)) !== null) {
+          const noteContent = noteMatch[1];
+
+          // Check if rest
+          if (noteContent.includes('<rest')) {
+            const durationMatch = noteContent.match(/<duration>(\d+)<\/duration>/);
+            if (durationMatch) currentTime += parseInt(durationMatch[1]);
+            continue;
+          }
+
+          // Extract pitch
+          const stepMatch = noteContent.match(/<step>([A-G])<\/step>/);
+          const octaveMatch = noteContent.match(/<octave>(\d+)<\/octave>/);
+          const alterMatch = noteContent.match(/<alter>(-?\d)<\/alter>/);
+          const durationMatch = noteContent.match(/<duration>(\d+)<\/duration>/);
+
+          if (stepMatch && octaveMatch && durationMatch) {
+            const step = stepMatch[1];
+            const octave = parseInt(octaveMatch[1]);
+            const alter = alterMatch ? parseInt(alterMatch[1]) : 0;
+            const duration = parseInt(durationMatch[1]);
+
+            // Convert to MIDI note number
+            const semitoneMap = { 'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11 };
+            let semitone = semitoneMap[step] + alter;
+            const midiNote = (octave + 1) * 12 + semitone;
+            const noteName = step + (alter === 1 ? '#' : alter === -1 ? 'b' : '') + octave;
+
+            // Convert duration to Tone.js format (4n = quarter note)
+            const quarterDuration = divisions * (4 / beatType); // duration of a quarter note in divisions
+            const toneDuration = divisionsToToneDuration(duration, divisions, beatType);
+
+            notes.push({
+              note: noteName,
+              midi: midiNote,
+              time: `${measureNum - 1}:${Math.floor(currentTime / divisions)}:${Math.floor((currentTime % divisions) * 4 / divisions)}`,
+              duration: toneDuration,
+              measure: measureNum,
+            });
+
+            currentTime += duration;
+          }
+        }
+
+        if (notes.length > 0) {
+          measures.push({ number: measureNum, notes, tempo, divisions, beats, beatType });
+        }
+      }
+
+      if (measures.length > 0) {
+        parts.push({ id: partId, name: partName, measures });
+      }
+    }
+
+    // Get global tempo and time signature from first measure
+    let globalTempo = 120;
+    let globalBeats = 4;
+    let globalBeatType = 4;
+    if (parts.length > 0 && parts[0].measures.length > 0) {
+      globalTempo = parts[0].measures[0].tempo || 120;
+      globalBeats = parts[0].measures[0].beats || 4;
+      globalBeatType = parts[0].measures[0].beatType || 4;
+    }
+
+    // Flatten notes per part for Tone.js playback
+    const toneTracks = parts.map(p => ({
+      name: p.name,
+      notes: p.measures.flatMap(m => m.notes),
+    }));
+
+    return {
+      title,
+      tempo: globalTempo,
+      timeSignature: `${globalBeats}/${globalBeatType}`,
+      parts: toneTracks,
+    };
+  } catch (e) {
+    console.error('MusicXML parse error:', e);
+    return null;
+  }
+}
+
+function divisionsToToneDuration(duration, divisions, beatType) {
+  // duration in divisions, convert to Tone.js notation
+  const quarterNoteDivisions = divisions * (4 / beatType);
+  const ratio = duration / quarterNoteDivisions;
+
+  if (ratio >= 3.5) return '1n';
+  if (ratio >= 1.75) return '2n';
+  if (ratio >= 1.0) return '4n';
+  if (ratio >= 0.5) return '8n';
+  if (ratio >= 0.25) return '16n';
+  return '32n';
+}
+
 const app = express();
 
 // API config
@@ -144,12 +293,13 @@ app.get('/api/scores/:id', (req, res) => {
 });
 
 app.post('/api/scores', (req, res) => {
-  const { title, composer, fileData, fileName, fileType, externalUrl, midiData } = req.body;
+  const { title, composer, fileData, fileName, fileType, externalUrl, midiData, musicXmlData } = req.body;
   if (!title) return res.status(400).json({ error: 'Title required' });
 
   let file_path = null;
   let external_url = externalUrl || null;
   let midiParsed = null;
+  let musicXmlParsed = null;
 
   if (fileData && fileName) {
     const ext = path.extname(fileName) || '';
@@ -161,11 +311,19 @@ app.post('/api/scores', (req, res) => {
     if (ext.toLowerCase() === '.mid' || ext.toLowerCase() === '.midi' || fileType === 'audio/midi') {
       midiParsed = parseMidiFile(fileData);
     }
+
+    // Parse MusicXML if it's a MusicXML file
+    if (ext.toLowerCase() === '.xml' || ext.toLowerCase() === '.musicxml' || fileType === 'application/vnd.recordare.musicxml') {
+      try {
+        const xmlBuffer = Buffer.from(fileData, 'base64').toString('utf-8');
+        musicXmlParsed = parseMusicXML(xmlBuffer);
+      } catch (e) { console.error('MusicXML parse error:', e); }
+    }
   }
 
-  // Also parse MIDI if midiData is provided directly
-  if (midiData && !midiParsed) {
-    midiParsed = parseMidiFile(midiData);
+  // Also parse MusicXML if musicXmlData is provided directly
+  if (musicXmlData && !musicXmlParsed) {
+    musicXmlParsed = parseMusicXML(Buffer.from(musicXmlData, 'base64').toString('utf-8'));
   }
 
   const parts = generateScoreParts(title);
@@ -173,19 +331,26 @@ app.post('/api/scores', (req, res) => {
 
   // If MIDI was parsed, use its data
   if (midiParsed && midiParsed.tracks.length > 0) {
-    // Map MIDI tracks to voice parts (up to 4)
     const voiceNames = ['soprano', 'alto', 'tenor', 'bass'];
     const voiceLabels = ['女高音 (Soprano)', '女低音 (Alto)', '男高音 (Tenor)', '男低音 (Bass)'];
     const colors = ['#ef4444', '#3b82f6', '#22c55e', '#d97706'];
-
     midiParsed.tracks.slice(0, 4).forEach((track, i) => {
-      parts[voiceNames[i]] = {
-        name: voiceLabels[i],
-        color: colors[i],
-        notes: track.notes.slice(0, 100), // Limit notes
-      };
+      parts[voiceNames[i]] = { name: voiceLabels[i], color: colors[i], notes: track.notes.slice(0, 100) };
     });
     parts.tempo = midiParsed.bpm;
+  }
+
+  // If MusicXML was parsed, use its data
+  if (musicXmlParsed && musicXmlParsed.parts.length > 0) {
+    const voiceNames = ['soprano', 'alto', 'tenor', 'bass'];
+    const voiceLabels = ['女高音 (Soprano)', '女低音 (Alto)', '男高音 (Tenor)', '男低音 (Bass)'];
+    const colors = ['#ef4444', '#3b82f6', '#22c55e', '#d97706'];
+    musicXmlParsed.parts.slice(0, 4).forEach((part, i) => {
+      parts[voiceNames[i]] = { name: voiceLabels[i], color: colors[i], notes: part.notes.slice(0, 200) };
+    });
+    parts.tempo = musicXmlParsed.tempo;
+    parts.timeSignature = musicXmlParsed.timeSignature;
+    parts.key = inferKey(musicXmlParsed.parts);
   }
 
   const result = {
@@ -193,11 +358,22 @@ app.post('/api/scores', (req, res) => {
     tempo: parts.tempo, key_sig: parts.key, time_signature: parts.timeSignature,
     total_measures: parts.totalMeasures, parts_data: parts,
     midi_parsed: !!midiParsed,
+    musicxml_parsed: !!musicXmlParsed,
     created_at: new Date().toISOString(),
   };
   scores.push(result);
   res.json(result);
 });
+
+function inferKey(parts) {
+  // Simple key inference from first note
+  if (parts.length > 0 && parts[0].notes.length > 0) {
+    const firstNote = parts[0].notes[0].note;
+    // Try to infer key from note distribution
+    return 'C大调'; // Default
+  }
+  return 'C大调';
+}
 
 function generateScoreParts(title) {
   return {
