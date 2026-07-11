@@ -9,7 +9,7 @@ const app = express();
 
 // API config
 const DEEPSEEK_API_KEY = process.env.DEEPEEK_API_KEY || 'sk-7fa9ea181c2748d793f26f184fe756de';
-const KIMI_API_KEY = process.env.KIMI_API_KEY || '';
+const KIMI_API_KEY = process.env.KIMI_API_KEY || 'sk-mB6NN8flAt7hsVbxfMhzOjMP15qCS87kZnYeS3yXTo1miPqg';
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
