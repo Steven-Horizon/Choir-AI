@@ -618,8 +618,10 @@ function runAudiveris(inputPath, outputDir) {
   return new Promise((resolve, reject) => {
     // Check if audiveris is installed
     const audiverisCmd = process.env.AUDIVERIS_PATH || 'audiveris';
+    console.log(`Trying Audiveris at: ${audiverisCmd}`);
     exec(`${audiverisCmd} -help`, (err) => {
       if (err) {
+        console.error('Audiveris not found:', err.message);
         reject(new Error('Audiveris not installed. Please install from https://github.com/Audiveris/audiveris'));
         return;
       }

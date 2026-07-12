@@ -1,12 +1,21 @@
+[phases.setup]
+nixPkgs = ["nodejs_20", "jdk17", "wget", "unzip"]
+
 [phases.build]
 cmds = [
     "npm install",
     "npm run build",
-    "cd api && npm install"
+    "cd api && npm install",
+    "echo '=== Installing Audiveris ==='",
+    "mkdir -p /app/audiveris",
+    "wget -q https://github.com/Audiveris/audiveris/releases/download/5.3.1/Audiveris-5.3.1-linux-x86_64.zip -O /tmp/audiveris.zip || echo 'Download failed, will try alternative'",
+    "unzip -q /tmp/audiveris.zip -d /app/audiveris/ || echo 'Unzip failed'",
+    "chmod +x /app/audiveris/bin/audiveris || echo 'No bin/audiveris found'",
+    "ls -la /app/audiveris/ || echo 'Audiveris dir empty'"
 ]
-
-[phases.setup]
-nixPkgs = ["nodejs_20", "jdk17"]
 
 [start]
 cmd = "node api/index.js"
+
+[variables]
+AUDIVERIS_PATH = "/app/audiveris/bin/audiveris"
