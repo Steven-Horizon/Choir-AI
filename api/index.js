@@ -616,35 +616,56 @@ const fs = require('fs');
 
 function runAudiveris(inputPath, outputDir) {
   return new Promise((resolve, reject) => {
-    // Check if audiveris JAR exists
     const fs = require('fs');
-    const jarPath = '/app/audiveris/audiveris.jar';
+    const { execSync } = require('child_process');
 
-    if (!fs.existsSync(jarPath)) {
+    // Search for Audiveris binary in common paths
+    let audiverisPath = null;
+    const possiblePaths = [
+      '/app/audiveris/bin/Audiveris',
+      '/app/audiveris/usr/bin/Audiveris',
+      '/usr/bin/Audiveris',
+    ];
+
+    for (const p of possiblePaths) {
+      try {
+        if (fs.existsSync(p)) {
+          audiverisPath = p;
+          break;
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Try 'which' command
+    if (!audiverisPath) {
+      try {
+        audiverisPath = execSync('which Audiveris', { encoding: 'utf8' }).trim();
+      } catch { /* ignore */ }
+    }
+
+    if (!audiverisPath) {
       reject(new Error('Audiveris not installed. Please install from https://github.com/Audiveris/audiveris'));
       return;
     }
 
-    console.log(`Found Audiveris JAR at: ${jarPath}`);
+    console.log(`Found Audiveris at: ${audiverisPath}`);
 
-      // Run conversion using JAR
-      const cmd = `java -jar /app/audiveris/audiveris.jar -batch -export MusicXML -output "${outputDir}" "${inputPath}"`;
-      exec(cmd, { timeout: 120000 }, (error, stdout, stderr) => {
-        if (error) {
-          reject(new Error(`Audiveris failed: ${stderr || error.message}`));
-          return;
-        }
+    const cmd = `"${audiverisPath}" -batch -export MusicXML -output "${outputDir}" "${inputPath}"`;
+    exec(cmd, { timeout: 120000 }, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(`Audiveris failed: ${stderr || error.message}`));
+        return;
+      }
 
-        // Find output .mxl file
-        const files = fs.readdirSync(outputDir);
-        const mxlFile = files.find(f => f.endsWith('.mxl'));
-        if (!mxlFile) {
-          reject(new Error('No MusicXML output generated'));
-          return;
-        }
+      const files = fs.readdirSync(outputDir);
+      const mxlFile = files.find(f => f.endsWith('.mxl'));
+      if (!mxlFile) {
+        reject(new Error('No MusicXML output generated'));
+        return;
+      }
 
-        resolve(path.join(outputDir, mxlFile));
-      });
+      resolve(path.join(outputDir, mxlFile));
+    });
     });
   });
 }
