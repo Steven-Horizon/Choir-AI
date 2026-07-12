@@ -1,5 +1,5 @@
 [phases.setup]
-nixPkgs = ["nodejs_20", "jdk17", "wget"]
+nixPkgs = ["nodejs_20", "jdk17", "wget", "binutils"]
 
 [phases.build]
 cmds = [
