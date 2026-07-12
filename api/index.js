@@ -338,11 +338,15 @@ app.post('/api/scores', (req, res) => {
     musicXmlParsed = parseMusicXML(Buffer.from(musicXmlData, 'base64').toString('utf-8'));
   }
 
-  const parts = generateScoreParts(title);
-  const id = scores.length + 1;
+  let parts = null;
+  let tempo = 72;
+  let key_sig = '';
+  let time_signature = '4/4';
+  let total_measures = 0;
 
-  // If MIDI was parsed, use its data
+  // Only set parts_data if we successfully parsed a music file
   if (midiParsed && midiParsed.tracks.length > 0) {
+    parts = generateScoreParts(title);
     const voiceNames = ['soprano', 'alto', 'tenor', 'bass'];
     const voiceLabels = ['女高音 (Soprano)', '女低音 (Alto)', '男高音 (Tenor)', '男低音 (Bass)'];
     const colors = ['#ef4444', '#3b82f6', '#22c55e', '#d97706'];
@@ -350,10 +354,11 @@ app.post('/api/scores', (req, res) => {
       parts[voiceNames[i]] = { name: voiceLabels[i], color: colors[i], notes: track.notes.slice(0, 100) };
     });
     parts.tempo = midiParsed.bpm;
+    tempo = midiParsed.bpm;
   }
 
-  // If MusicXML was parsed, use its data
   if (musicXmlParsed && musicXmlParsed.parts.length > 0) {
+    parts = generateScoreParts(title);
     const voiceNames = ['soprano', 'alto', 'tenor', 'bass'];
     const voiceLabels = ['女高音 (Soprano)', '女低音 (Alto)', '男高音 (Tenor)', '男低音 (Bass)'];
     const colors = ['#ef4444', '#3b82f6', '#22c55e', '#d97706'];
@@ -362,13 +367,22 @@ app.post('/api/scores', (req, res) => {
     });
     parts.tempo = musicXmlParsed.tempo;
     parts.timeSignature = musicXmlParsed.timeSignature;
-    parts.key = inferKey(musicXmlParsed.parts);
+    tempo = musicXmlParsed.tempo;
+    time_signature = musicXmlParsed.timeSignature;
+  }
+
+  // For other file types (PDF, images, audio), parts_data is null - no fake data
+  if (parts) {
+    key_sig = parts.key;
+    time_signature = parts.timeSignature;
+    total_measures = parts.totalMeasures;
   }
 
   const result = {
-    id, title, composer: composer || '', file_path, external_url,
-    tempo: parts.tempo, key_sig: parts.key, time_signature: parts.timeSignature,
-    total_measures: parts.totalMeasures, parts_data: parts,
+    id: scores.length + 1, title, composer: composer || '', file_path, external_url,
+    tempo, key_sig, time_signature,
+    total_measures,
+    parts_data: parts,
     midi_parsed: !!midiParsed,
     musicxml_parsed: !!musicXmlParsed,
     created_at: new Date().toISOString(),
@@ -377,15 +391,6 @@ app.post('/api/scores', (req, res) => {
   res.json(result);
 });
 
-function inferKey(parts) {
-  // Simple key inference from first note
-  if (parts.length > 0 && parts[0].notes.length > 0) {
-    const firstNote = parts[0].notes[0].note;
-    // Try to infer key from note distribution
-    return 'C大调'; // Default
-  }
-  return 'C大调';
-}
 
 function generateScoreParts(title) {
   return {
