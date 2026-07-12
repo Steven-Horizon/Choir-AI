@@ -496,7 +496,10 @@ app.delete('/api/plans/:id', (req, res) => { const idx = trainingPlans.findIndex
 // =================== CHAT - Kimi API (supports images) ===================
 function callKimi(msgs, apiKey) {
   return new Promise((resolve, reject) => {
-    const postData = JSON.stringify({ model: 'moonshot-v1-8k', messages: msgs, temperature: 0.7 });
+    // Use vision model when there are image attachments
+    const hasImages = msgs.some(m => Array.isArray(m.content) && m.content.some(c => c.type === 'image_url'));
+    const model = hasImages ? 'moonshot-v1-8k-vision-preview' : 'moonshot-v1-8k';
+    const postData = JSON.stringify({ model, messages: msgs, temperature: 0.7 });
     const req = https.request({
       hostname: 'api.moonshot.cn', path: '/v1/chat/completions', method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey || KIMI_API_KEY}`, 'Content-Length': Buffer.byteLength(postData) },
