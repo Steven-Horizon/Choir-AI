@@ -1,24 +1,19 @@
 [phases.setup]
-nixPkgs = ["nodejs_20", "jdk17", "wget", "binutils"]
+nixPkgs = ["nodejs_20", "jdk17", "wget"]
 
 [phases.build]
 cmds = [
     "npm install",
     "npm run build",
     "cd api && npm install",
-    "echo '=== Installing Audiveris 5.11.0 ==='",
+    "echo '=== Download Audiveris JAR ==='",
     "mkdir -p /app/audiveris",
-    "wget -q https://github.com/Audiveris/audiveris/releases/download/5.11.0/Audiveris-5.11.0-ubuntu22.04-x86_64.deb -O /tmp/audiveris.deb",
-    "echo '=== Extracting .deb ==='",
-    "cd /tmp && ar x audiveris.deb && ls -la",
-    "cd /tmp && tar -xf data.tar.* -C /app/audiveris --strip-components=1",
-    "ls -la /app/audiveris/bin/ || echo 'No bin dir'",
-    "ls -la /app/audiveris/lib/ || echo 'No lib dir'",
-    "rm -f /tmp/audiveris.deb /tmp/data.tar.* /tmp/control.tar.* /tmp/debian-binary"
+    "wget -q https://github.com/Audiveris/audiveris/releases/download/5.11.0/Audiveris-5.11.0.jar -O /app/audiveris/audiveris.jar || echo 'JAR download failed'",
+    "ls -la /app/audiveris/"
 ]
 
 [start]
 cmd = "node api/index.js"
 
 [variables]
-AUDIVERIS_PATH = "/app/audiveris/bin/Audiveris"
+AUDIVERIS_PATH = "java -jar /app/audiveris.jar"
