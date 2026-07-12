@@ -616,43 +616,19 @@ const fs = require('fs');
 
 function runAudiveris(inputPath, outputDir) {
   return new Promise((resolve, reject) => {
-    // Check if audiveris is installed
-    const audiverisCmd = process.env.AUDIVERIS_PATH || 'audiveris';
-    console.log(`Trying Audiveris at: ${audiverisCmd}`);
+    // Check if audiveris JAR exists
+    const fs = require('fs');
+    const jarPath = '/app/audiveris/audiveris.jar';
 
-    // Try multiple possible paths
-    const possiblePaths = [
-      audiverisCmd,
-      '/app/audiveris/bin/Audiveris',
-      '/usr/bin/audiveris',
-      'audiveris'
-    ];
-
-    let foundPath = null;
-    for (const p of possiblePaths) {
-      try {
-        require('child_process').execSync(`test -f ${p}`, { stdio: 'ignore' });
-        foundPath = p;
-        break;
-      } catch { /* try next */ }
-    }
-
-    if (!foundPath) {
+    if (!fs.existsSync(jarPath)) {
       reject(new Error('Audiveris not installed. Please install from https://github.com/Audiveris/audiveris'));
       return;
     }
 
-    console.log(`Found Audiveris at: ${foundPath}`);
+    console.log(`Found Audiveris JAR at: ${jarPath}`);
 
-    exec(`${foundPath} -help`, (err) => {
-      if (err) {
-        console.error('Audiveris not executable:', err.message);
-        reject(new Error('Audiveris not installed. Please install from https://github.com/Audiveris/audiveris'));
-        return;
-      }
-
-      // Run conversion
-      const cmd = `${audiverisCmd} -batch -export MusicXML -output "${outputDir}" "${inputPath}"`;
+      // Run conversion using JAR
+      const cmd = `java -jar /app/audiveris/audiveris.jar -batch -export MusicXML -output "${outputDir}" "${inputPath}"`;
       exec(cmd, { timeout: 120000 }, (error, stdout, stderr) => {
         if (error) {
           reject(new Error(`Audiveris failed: ${stderr || error.message}`));
