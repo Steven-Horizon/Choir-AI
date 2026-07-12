@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - DEEPEEK_API_KEY=sk-7fa9ea181c2748d793f26f184fe756de
+      - KIMI_API_KEY=sk-mB6NN8flAt7hsVbxfMhzOjMP15qCS87kZnYeS3yXTo1miPqg
+      - AUDIVERIS_URL=http://audiveris:8080
+    depends_on:
+      - audiveris
+
+  audiveris:
+    image: toprock/audiveris:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - audiveris-output:/output
+      - audiveris-input:/input
+
+volumes:
+  audiveris-output:
+  audiveris-input:

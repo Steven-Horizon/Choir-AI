@@ -1,0 +1,12 @@
+[phases.build]
+cmds = [
+    "npm install",
+    "npm run build",
+    "cd api && npm install"
+]
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "jdk17"]
+
+[start]
+cmd = "node api/index.js"
