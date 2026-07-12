@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   Menu, Plus, Send, Bot, User, Trash2, X,
   MessageSquare, Sparkles, ChevronLeft, Loader2,
-  Paperclip, FileText, Settings, ImageIcon
+  Paperclip, FileText, ImageIcon
 } from 'lucide-react';
 import { API_BASE } from '@/config';
 import ReactMarkdown from 'react-markdown';
@@ -45,15 +45,16 @@ const WELCOME_MSG: ChatMessage = {
   id: 0, role: 'assistant',
   content: `你好！我是你的合唱训练AI助手。
 
-**当前模型：DeepSeek V3**（默认）
+**当前模型：DeepSeek V3**（文字对话）/ **Kimi**（图片分析）
 
 我可以帮你：
 - **制定训练计划** — 根据曲目和声部安排个性化方案
 - **分析谱面** — 调性、难点段落、和声走向
 - **音准/节奏指导** — 针对性的练习建议
-- **合唱知识问答** — 乐理、发声技巧、声部配合
+- **合唱知识问答** — 乐理、发声技巧、声部协调
+- **分析五线谱图片** — 上传乐谱照片，自动切换到 Kimi 模型分析
 
-**💡 上传图片分析**：点击 📎 上传五线谱照片，有图片时会自动切换到 Kimi 模型进行分析。`,
+💡 上传图片时会自动使用 Kimi 模型进行图像分析。`,
 };
 
 type AIModel = 'auto' | 'deepseek' | 'kimi';
@@ -69,15 +70,18 @@ export default function AIAgent() {
   const [isMobile, setIsMobile] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [model, setModel] = useState<AIModel>('auto');
-  const [kimiKey, setKimiKey] = useState(localStorage.getItem('kimi_api_key') || '');
-  const [showSettings, setShowSettings] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentSession = sessions.find(s => s.id === currentId);
   const hasImageAttachments = attachments.some(a => a.type.startsWith('image/'));
-  const effectiveModel = model === 'auto' && hasImageAttachments && kimiKey ? 'kimi' : model === 'kimi' && !kimiKey ? 'deepseek' : model;
+
+  // Model logic: backend decides based on forceModel + attachments
+  // Frontend just shows what will happen
+  const effectiveModel: AIModel = model === 'auto'
+    ? (hasImageAttachments ? 'kimi' : 'deepseek')
+    : model;
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -146,11 +150,6 @@ export default function AIAgent() {
     setAttachments(prev => prev.filter((_, i) => i !== index));
   };
 
-  const saveKimiKey = () => {
-    localStorage.setItem('kimi_api_key', kimiKey);
-    setShowSettings(false);
-  };
-
   const handleSend = async () => {
     if ((!input.trim() && attachments.length === 0) || loading) return;
     const content = input.trim();
@@ -165,11 +164,8 @@ export default function AIAgent() {
       setSessions(currentSessions); setCurrentId(sid);
     }
 
-    // Build user message WITH attachments for display
     const userMsg: ChatMessage = {
-      id: Date.now(),
-      role: 'user',
-      content,
+      id: Date.now(), role: 'user', content,
       attachments: attachments.length > 0 ? [...attachments] : undefined,
     };
     const updatedMessages = [...messages.filter(m => m.id !== 0 || messages.length === 1), userMsg];
@@ -193,7 +189,6 @@ export default function AIAgent() {
           message: content || '请帮我分析这张图片',
           sessionId: sid,
           forceModel,
-          kimiKey: kimiKey || undefined,
           attachments: sentAttachments.map(a => ({ name: a.name, type: a.type, data: a.data })),
         }),
       });
@@ -201,10 +196,8 @@ export default function AIAgent() {
       const data = await res.json();
 
       const aiMsg: ChatMessage = {
-        id: Date.now() + 1,
-        role: 'assistant',
-        content: data.content,
-        model: data.model,
+        id: Date.now() + 1, role: 'assistant',
+        content: data.content, model: data.model,
       };
       const finalMessages = [...updatedMessages, aiMsg];
       setMessages(finalMessages);
@@ -227,10 +220,8 @@ export default function AIAgent() {
     if (inputRef.current) { inputRef.current.style.height = 'auto'; inputRef.current.style.height = Math.min(120, inputRef.current.scrollHeight) + 'px'; }
   }, [input]);
 
-  // Model indicator text
   const modelIndicator = () => {
-    if (effectiveModel === 'kimi') return { text: 'Kimi', color: 'bg-purple-500/20 text-purple-400', desc: '支持图片' };
-    if (model === 'auto') return { text: 'DeepSeek', color: 'bg-blue-500/20 text-blue-400', desc: '自动模式' };
+    if (effectiveModel === 'kimi') return { text: 'Kimi', color: 'bg-purple-500/20 text-purple-400', desc: '图片分析' };
     return { text: 'DeepSeek', color: 'bg-blue-500/20 text-blue-400', desc: '文字对话' };
   };
   const mi = modelIndicator();
@@ -278,41 +269,15 @@ export default function AIAgent() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* Model Switcher */}
-            <select
-              value={model}
-              onChange={e => setModel(e.target.value as AIModel)}
-              className="bg-neutral-800 border border-neutral-700 rounded-lg px-2 py-1 text-xs text-neutral-300 focus:outline-none focus:border-amber-500"
-            >
-              <option value="auto">自动 (有图片→Kimi)</option>
+            <select value={model} onChange={e => setModel(e.target.value as AIModel)}
+              className="bg-neutral-800 border border-neutral-700 rounded-lg px-2 py-1 text-xs text-neutral-300 focus:outline-none focus:border-amber-500">
+              <option value="auto">自动</option>
               <option value="deepseek">DeepSeek</option>
-              <option value="kimi" disabled={!kimiKey}>Kimi {kimiKey ? '' : '(需Key)'}</option>
+              <option value="kimi">Kimi</option>
             </select>
-            <button onClick={() => setShowSettings(true)} className="p-1.5 rounded-lg hover:bg-neutral-800 text-neutral-400" title="设置"><Settings className="w-4 h-4" /></button>
             <button onClick={createNewSession} className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-800 rounded-lg text-xs text-neutral-300 hover:bg-neutral-700"><Plus className="w-3.5 h-3.5" /><span>新会话</span></button>
           </div>
         </div>
-
-        {/* Settings Modal */}
-        {showSettings && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-            <div className="bg-neutral-900 rounded-2xl border border-neutral-800 p-6 w-full max-w-md">
-              <div className="flex items-center justify-between mb-5">
-                <h3 className="font-semibold text-lg">API 设置</h3>
-                <button onClick={() => setShowSettings(false)} className="text-neutral-500 hover:text-white"><X className="w-5 h-5" /></button>
-              </div>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm text-neutral-400 mb-1.5">Kimi API Key（用于图片分析）</label>
-                  <input type="password" value={kimiKey} onChange={e => setKimiKey(e.target.value)} placeholder="sk-xxxxxxxxxxxxxxxx"
-                    className="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-purple-500" />
-                  <p className="text-xs text-neutral-500 mt-1">获取：<a href="https://platform.moonshot.cn" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">platform.moonshot.cn</a></p>
-                </div>
-                <button onClick={saveKimiKey} className="w-full bg-purple-500 text-white font-medium py-2.5 rounded-lg hover:bg-purple-600">保存</button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* Messages */}
         <div className="flex-1 overflow-auto p-4 space-y-4">
@@ -322,7 +287,6 @@ export default function AIAgent() {
                 <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center flex-shrink-0 mt-0.5"><Bot className="w-4 h-4 text-white" /></div>
               )}
               <div className={`max-w-[85%] rounded-xl px-4 py-3 ${msg.role === 'user' ? 'bg-amber-500 text-black' : 'bg-neutral-800/80 border border-neutral-700/50 text-neutral-200'}`}>
-                {/* User attachments display */}
                 {msg.attachments && msg.attachments.length > 0 && (
                   <div className="flex flex-wrap gap-2 mb-2">
                     {msg.attachments.map((att, i) => (
@@ -360,9 +324,7 @@ export default function AIAgent() {
             <div className="flex gap-3">
               <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center flex-shrink-0"><Loader2 className="w-4 h-4 text-white animate-spin" /></div>
               <div className="bg-neutral-800/80 border border-neutral-700/50 rounded-xl px-4 py-3">
-                <p className="text-sm text-neutral-400">
-                  {effectiveModel === 'kimi' ? 'Kimi 思考中...' : 'DeepSeek 思考中...'}
-                </p>
+                <p className="text-sm text-neutral-400">{effectiveModel === 'kimi' ? 'Kimi 思考中...' : 'DeepSeek 思考中...'}</p>
               </div>
             </div>
           )}
@@ -371,7 +333,6 @@ export default function AIAgent() {
 
         {/* Input */}
         <div className="p-3 border-t border-neutral-800 bg-neutral-900/80 backdrop-blur-sm">
-          {/* Attachment previews */}
           {attachments.length > 0 && (
             <div className="flex flex-wrap gap-2 mb-2 max-w-3xl mx-auto">
               {attachments.map((att, i) => (
@@ -390,9 +351,8 @@ export default function AIAgent() {
                   )}
                 </div>
               ))}
-              {/* Model auto-switch hint */}
               {hasImageAttachments && model === 'auto' && (
-                <span className="text-[10px] bg-purple-500/20 text-purple-400 px-2 py-1 rounded self-center">检测到图片 → 自动使用 Kimi</span>
+                <span className="text-[10px] bg-purple-500/20 text-purple-400 px-2 py-1 rounded self-center">检测到图片 → Kimi</span>
               )}
             </div>
           )}
