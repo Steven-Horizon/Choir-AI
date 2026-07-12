@@ -164,12 +164,7 @@ export default function ScoreLibrary() {
                 </div>
               </div>
               <h3 className="font-semibold mb-1 group-hover:text-amber-400 transition-colors">{s.title}</h3>
-              <p className="text-sm text-neutral-500 mb-2">{s.composer || '未知作曲家'}</p>
-              <div className="flex items-center gap-3 text-xs text-neutral-600 mb-3">
-                <span>{s.key_sig}</span>
-                <span>♩={s.tempo}</span>
-                <span>{s.total_measures}小节</span>
-              </div>
+              <p className="text-sm text-neutral-500 mb-2">{s.composer || ''}</p>
               <div className="flex gap-2">
                 {(s.file_path || s.external_url) && (
                   <button onClick={() => setPreview(s)}

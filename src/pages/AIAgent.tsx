@@ -291,9 +291,13 @@ export default function AIAgent() {
                   <div className="flex flex-wrap gap-2 mb-2">
                     {msg.attachments.map((att, i) => (
                       <div key={i}>
-                        {att.type?.startsWith('image/') ? (
-                          <img src={att.preview || `data:${att.type};base64,${att.data}`} alt={att.name}
-                            className="max-w-[200px] max-h-[150px] rounded-lg object-cover border border-black/10" />
+                        {att.type?.startsWith('image/') && att.preview ? (
+                          <img 
+                            src={att.preview} 
+                            alt={att.name}
+                            className="max-w-[180px] max-h-[120px] rounded-lg object-cover border border-black/10" 
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                          />
                         ) : (
                           <div className="flex items-center gap-1.5 bg-black/20 rounded-lg px-3 py-2 text-xs">
                             <FileText className="w-3.5 h-3.5" />
@@ -337,9 +341,14 @@ export default function AIAgent() {
             <div className="flex flex-wrap gap-2 mb-2 max-w-3xl mx-auto">
               {attachments.map((att, i) => (
                 <div key={i} className="relative group">
-                  {att.type?.startsWith('image/') ? (
+                  {att.type?.startsWith('image/') && att.preview ? (
                     <div className="relative">
-                      <img src={att.preview} alt={att.name} className="w-16 h-16 rounded-lg object-cover border border-neutral-700" />
+                      <img 
+                        src={att.preview} 
+                        alt={att.name} 
+                        className="w-16 h-16 rounded-lg object-cover border border-neutral-700" 
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                      />
                       <button onClick={() => removeAttachment(i)} className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100"><X className="w-3 h-3 text-white" /></button>
                     </div>
                   ) : (
