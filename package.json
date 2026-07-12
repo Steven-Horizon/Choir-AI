@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "start": "cd backend && node server.js",
+    "start": "node api/index.js",
+    "postinstall": "cd api && npm install",
     "lint": "eslint .",
     "preview": "vite preview"
   },
