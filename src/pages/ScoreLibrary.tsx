@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Music, Upload, Plus, FileMusic, Eye, X, ExternalLink, Link as LinkIcon } from 'lucide-react';
 import { API_BASE } from '@/config';
+import { syncData, saveLocal } from '@/lib/localStorage';
 
 
 interface Score {
@@ -31,28 +32,16 @@ export default function ScoreLibrary() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
 
-  // Load from localStorage first (instant), then fetch from server
+  // Sync: load from localStorage first, then sync with server
   useEffect(() => {
-    const cached = localStorage.getItem('choir_scores_cache');
-    if (cached) {
-      try { setScores(JSON.parse(cached)); } catch { /* ignore */ }
-    }
-    fetchScores();
+    syncData<Score>('scores',
+      () => fetch(`${API_BASE}/api/scores`).then(r => r.json()),
+      (items) => fetch(`${API_BASE}/api/scores/sync`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items })
+      }).then(() => {})
+    ).then(setScores);
   }, []);
-
-  const fetchScores = () => {
-    fetch(`${API_BASE}/api/scores`).then(r => r.json()).then(data => {
-      setScores(data);
-      // Save to localStorage for persistence across refreshes
-      localStorage.setItem('choir_scores_cache', JSON.stringify(data));
-    }).catch(() => {
-      // If server fails, keep localStorage cache
-      const cached = localStorage.getItem('choir_scores_cache');
-      if (cached && scores.length === 0) {
-        try { setScores(JSON.parse(cached)); } catch { /* ignore */ }
-      }
-    });
-  };
 
   // Convert file to base64
   const fileToBase64 = (file: File): Promise<string> => {
@@ -109,9 +98,15 @@ export default function ScoreLibrary() {
         throw new Error(data.error || `上传失败 (${res.status})`);
       }
 
+      const result = await res.json();
+
+      // Save to localStorage immediately
+      const updated = [result, ...scores];
+      saveLocal('scores', updated);
+      setScores(updated);
+
       setShowUpload(false);
       setTitle(''); setComposer(''); setFile(null); setExternalUrl(''); setUploadMode('file');
-      fetchScores();
     } catch (err: any) {
       setUploadError(err.message || '上传失败');
     }

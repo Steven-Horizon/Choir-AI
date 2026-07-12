@@ -286,6 +286,18 @@ function secToToneDuration(sec) {
 // =================== SCORES ===================
 app.get('/api/scores', (req, res) => { res.json(scores); });
 
+// Batch sync scores (for localStorage recovery)
+app.post('/api/scores/sync', (req, res) => {
+  const { items } = req.body;
+  if (!Array.isArray(items)) return res.status(400).json({ error: 'items must be array' });
+  items.forEach(item => {
+    if (!scores.find(s => s.id === item.id)) {
+      scores.push(item);
+    }
+  });
+  res.json({ success: true, count: scores.length });
+});
+
 app.get('/api/scores/:id', (req, res) => {
   const s = scores.find(x => x.id === parseInt(req.params.id));
   if (!s) return res.status(404).json({ error: 'Not found' });
@@ -394,7 +406,16 @@ app.get('/uploads/:filename', (req, res) => {
   res.send(buffer);
 });
 
-// =================== VOICE PARTS (same as before) ===================
+// =================== VOICE PARTS ===================
+app.post('/api/voice-parts/sync', (req, res) => {
+  const { items } = req.body;
+  if (!Array.isArray(items)) return res.status(400).json({ error: 'items must be array' });
+  items.forEach(item => {
+    if (!voiceParts.find(p => p.id === item.id)) voiceParts.push(item);
+  });
+  res.json({ success: true, count: voiceParts.length });
+});
+
 app.post('/api/voice-parts', (req, res) => {
   const { name, password, creator } = req.body;
   if (!name || !password) return res.status(400).json({ error: 'Name and password required' });
@@ -450,7 +471,16 @@ app.patch('/api/voice-parts/:partId/tasks/:taskId', (req, res) => {
   res.json(task);
 });
 
-// =================== TRAINING PLANS (same as before) ===================
+// =================== TRAINING PLANS ===================
+app.post('/api/plans/sync', (req, res) => {
+  const { items } = req.body;
+  if (!Array.isArray(items)) return res.status(400).json({ error: 'items must be array' });
+  items.forEach(item => {
+    if (!trainingPlans.find(p => p.id === item.id)) trainingPlans.push(item);
+  });
+  res.json({ success: true, count: trainingPlans.length });
+});
+
 app.post('/api/plans', (req, res) => {
   const { title, scoreName, parts, startDate, endDate, phases, creator } = req.body;
   if (!title || !scoreName || !parts || parts.length === 0) return res.status(400).json({ error: 'Title, scoreName and parts required' });
