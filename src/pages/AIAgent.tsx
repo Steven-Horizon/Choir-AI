@@ -324,7 +324,7 @@ export default function AIAgent() {
             <div className="flex gap-3">
               <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center flex-shrink-0"><Loader2 className="w-4 h-4 text-white animate-spin" /></div>
               <div className="bg-neutral-800/80 border border-neutral-700/50 rounded-xl px-4 py-3">
-                <p className="text-sm text-neutral-400">{effectiveModel === 'kimi' ? 'Kimi 思考中...' : 'DeepSeek 思考中...'}</p>
+                <p className="text-sm text-neutral-400">助手思考中...</p>
               </div>
             </div>
           )}
