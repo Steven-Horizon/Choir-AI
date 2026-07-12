@@ -1,12 +1,22 @@
 [phases.setup]
-nixPkgs = ["nodejs_20", "jdk17"]
+nixPkgs = ["nodejs_20", "jdk17", "wget"]
 
 [phases.build]
 cmds = [
     "npm install",
     "npm run build",
-    "cd api && npm install"
+    "cd api && npm install",
+    "echo '=== Installing Audiveris 5.11.0 ==='",
+    "mkdir -p /app/audiveris",
+    "wget -q https://github.com/Audiveris/audiveris/releases/download/5.11.0/Audiveris-5.11.0-ubuntu22.04-x86_64.deb -O /tmp/audiveris.deb",
+    "cd /tmp && ar x audiveris.deb data.tar.xz && tar -xf data.tar.xz -C /app/audiveris --strip-components=1",
+    "ls -la /app/audiveris/bin/ || echo 'No bin dir'",
+    "ls -la /app/audiveris/lib/ || echo 'No lib dir'",
+    "rm -f /tmp/audiveris.deb /tmp/data.tar.xz"
 ]
 
 [start]
 cmd = "node api/index.js"
+
+[variables]
+AUDIVERIS_PATH = "/app/audiveris/bin/Audiveris"

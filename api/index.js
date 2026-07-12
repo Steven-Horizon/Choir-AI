@@ -619,9 +619,34 @@ function runAudiveris(inputPath, outputDir) {
     // Check if audiveris is installed
     const audiverisCmd = process.env.AUDIVERIS_PATH || 'audiveris';
     console.log(`Trying Audiveris at: ${audiverisCmd}`);
-    exec(`${audiverisCmd} -help`, (err) => {
+
+    // Try multiple possible paths
+    const possiblePaths = [
+      audiverisCmd,
+      '/app/audiveris/bin/Audiveris',
+      '/usr/bin/audiveris',
+      'audiveris'
+    ];
+
+    let foundPath = null;
+    for (const p of possiblePaths) {
+      try {
+        require('child_process').execSync(`test -f ${p}`, { stdio: 'ignore' });
+        foundPath = p;
+        break;
+      } catch { /* try next */ }
+    }
+
+    if (!foundPath) {
+      reject(new Error('Audiveris not installed. Please install from https://github.com/Audiveris/audiveris'));
+      return;
+    }
+
+    console.log(`Found Audiveris at: ${foundPath}`);
+
+    exec(`${foundPath} -help`, (err) => {
       if (err) {
-        console.error('Audiveris not found:', err.message);
+        console.error('Audiveris not executable:', err.message);
         reject(new Error('Audiveris not installed. Please install from https://github.com/Audiveris/audiveris'));
         return;
       }
