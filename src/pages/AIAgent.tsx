@@ -139,7 +139,7 @@ export default function AIAgent() {
     const newAttachments: Attachment[] = [];
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      if (file.size > 5 * 1024 * 1024) { alert(`文件 ${file.name} 超过 5MB 限制，已跳过`); continue; }
+      if (file.size > 35 * 1024 * 1024) { alert(`文件 ${file.name} 超过 35MB 限制，已跳过`); continue; }
       try { newAttachments.push(await fileToBase64(file)); } catch { alert(`文件 ${file.name} 读取失败`); }
     }
     setAttachments(prev => [...prev, ...newAttachments]);
@@ -372,7 +372,7 @@ export default function AIAgent() {
             </button>
           </div>
           <p className="text-[10px] text-neutral-600 text-center mt-2">
-            {effectiveModel === 'kimi' ? 'Kimi 模式：支持图片分析 · 单文件最大5MB' : 'DeepSeek 模式：文字对话 · 上传图片自动切换 Kimi'}
+            {effectiveModel === 'kimi' ? 'Kimi 模式：支持图片分析' : 'DeepSeek 模式：文字对话 · 上传图片自动切换 Kimi'}
           </p>
         </div>
       </div>

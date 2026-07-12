@@ -57,7 +57,7 @@ export default function ScoreLibrary() {
     });
   };
 
-  const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB limit
+  const MAX_FILE_SIZE = 35 * 1024 * 1024; // 35MB limit (Railway supports up to 50MB)
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -229,9 +229,9 @@ export default function ScoreLibrary() {
                     <Upload className="w-6 h-6 text-neutral-500 mx-auto mb-2" />
                     <p className="text-sm text-neutral-400">{file ? file.name : '点击上传文件'}</p>
                     <p className="text-xs text-neutral-600 mt-1">支持：PDF、图片、MIDI(.mid)、音频(mp3/wav)</p>
-                    <p className="text-xs text-amber-500/70 mt-1">⚠ 超过2MB的文件将只保存信息，不上传文件内容</p>
+                    <p className="text-xs text-amber-500/70 mt-1">⚠ 超过35MB的文件需使用网盘链接</p>
                     {file && file.size > MAX_FILE_SIZE && (
-                      <p className="text-xs text-amber-400 mt-1">此文件 { (file.size / 1024 / 1024).toFixed(1) }MB 超过限制，建议用"网盘链接"方式</p>
+                      <p className="text-xs text-amber-400 mt-1">此文件 { (file.size / 1024 / 1024).toFixed(1) }MB，超过35MB需使用网盘链接</p>
                     )}
                     <input type="file" accept=".pdf,.png,.jpg,.jpeg,.mp3,.wav,.m4a,.mid,.midi" onChange={e => setFile(e.target.files?.[0] || null)} className="hidden" />
                   </label>
