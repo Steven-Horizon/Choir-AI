@@ -610,6 +610,78 @@ app.get('/api/chat/sessions', (req, res) => {
   res.json(unique.map(id => ({ id, title: messages.find(m => m.session_id === id && m.role === 'user')?.content?.slice(0, 30) || '新会话', created_at: messages.find(m => m.session_id === id)?.created_at })));
 });
 
+// =================== PDF TO MUSICXML (Audiveris) ===================
+const { exec } = require('child_process');
+const fs = require('fs');
+
+function runAudiveris(inputPath, outputDir) {
+  return new Promise((resolve, reject) => {
+    // Check if audiveris is installed
+    const audiverisCmd = process.env.AUDIVERIS_PATH || 'audiveris';
+    exec(`${audiverisCmd} -help`, (err) => {
+      if (err) {
+        reject(new Error('Audiveris not installed. Please install from https://github.com/Audiveris/audiveris'));
+        return;
+      }
+
+      // Run conversion
+      const cmd = `${audiverisCmd} -batch -export MusicXML -output "${outputDir}" "${inputPath}"`;
+      exec(cmd, { timeout: 120000 }, (error, stdout, stderr) => {
+        if (error) {
+          reject(new Error(`Audiveris failed: ${stderr || error.message}`));
+          return;
+        }
+
+        // Find output .mxl file
+        const files = fs.readdirSync(outputDir);
+        const mxlFile = files.find(f => f.endsWith('.mxl'));
+        if (!mxlFile) {
+          reject(new Error('No MusicXML output generated'));
+          return;
+        }
+
+        resolve(path.join(outputDir, mxlFile));
+      });
+    });
+  });
+}
+
+app.post('/api/convert/pdf-to-musicxml', async (req, res) => {
+  const { fileData, fileName } = req.body;
+  if (!fileData || !fileName) return res.status(400).json({ error: 'fileData and fileName required' });
+
+  try {
+    // Save PDF temporarily
+    const tmpDir = `/tmp/audiveris_${Date.now()}`;
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const inputPath = path.join(tmpDir, fileName);
+    fs.writeFileSync(inputPath, Buffer.from(fileData, 'base64'));
+
+    // Run Audiveris
+    const outputPath = await runAudiveris(inputPath, tmpDir);
+
+    // Read output MusicXML
+    const mxlBuffer = fs.readFileSync(outputPath);
+
+    // Parse and return
+    const xmlContent = mxlBuffer.toString('utf-8');
+
+    // Clean up
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+
+    res.json({
+      success: true,
+      xmlData: xmlContent,
+      message: 'Conversion successful'
+    });
+  } catch (err) {
+    res.status(500).json({
+      error: err.message,
+      fallback: 'Please use Audiveris locally: https://github.com/Audiveris/audiveris'
+    });
+  }
+});
+
 // =================== REHEARSAL ===================
 app.post('/api/rehearsal/start', (req, res) => { res.json({ id: Date.now() }); });
 app.get('/api/rehearsal/records', (req, res) => { res.json([]); });
