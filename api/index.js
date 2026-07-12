@@ -687,12 +687,15 @@ app.post('/api/rehearsal/start', (req, res) => { res.json({ id: Date.now() }); }
 app.get('/api/rehearsal/records', (req, res) => { res.json([]); });
 
 // =================== SERVE FRONTEND ===================
-const distPath = path.join(__dirname, '..', 'dist');
-if (require('fs').existsSync(distPath)) {
-  app.use(express.static(distPath));
-  app.get('*', (req, res) => { res.sendFile(path.join(distPath, 'index.html')); });
-} else {
-  app.get('/', (req, res) => { res.json({ message: 'ChoirAI API Server Running', status: 'ok' }); });
+app.use(express.static(path.join(__dirname, '..', 'dist')));
+app.get('*', (req, res) => { res.sendFile(path.join(__dirname, '..', 'dist', 'index.html')); });
+
+// Start server if run directly (Railway, local), not if imported (Vercel)
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, () => {
+    console.log(`ChoirAI server running on port ${PORT}`);
+  });
 }
 
 module.exports = app;
