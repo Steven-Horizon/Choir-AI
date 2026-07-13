@@ -11,6 +11,7 @@ import TrainingPlans from '@/pages/TrainingPlans';
 import Settings from '@/pages/Settings';
 import SheetMusic from '@/pages/SheetMusic';
 import ScoreEditor from '@/pages/ScoreEditor';
+import WarmUpRoom from '@/pages/WarmUpRoom';
 
 export default function App() {
   return (
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="/settings" element={<Settings />} />
           <Route path="/sheet/:id" element={<SheetMusic />} />
           <Route path="/editor" element={<ScoreEditor />} />
+          <Route path="/warmup" element={<WarmUpRoom />} />
         </Routes>
       </Layout>
     </HashRouter>
