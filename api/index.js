@@ -688,22 +688,25 @@ function detectTrainingPlan(userMsg, aiReply) {
   const goals = [];
 
   if (msg.includes('听力') || msg.includes('听音') || msg.includes('听辨') || msg.includes('听写')) {
-    goals.push({ type: 'ear_training', title: '听力训练计划', desc: '音程听辨、和弦识别、旋律听写' });
+    goals.push({ type: 'ear_training', title: '听力训练', desc: '音程听辨、和弦识别、旋律听写' });
   }
   if (msg.includes('音准') || msg.includes('跑调') || msg.includes('不准')) {
-    goals.push({ type: 'pitch', title: '音准强化计划', desc: '单音模唱、音程模唱、调式音阶' });
+    goals.push({ type: 'pitch', title: '音准强化', desc: '单音模唱、音程模唱、调式音阶' });
   }
   if (msg.includes('节奏') || msg.includes('节拍') || msg.includes('拍子')) {
-    goals.push({ type: 'rhythm', title: '节奏训练计划', desc: '基本节拍、切分节奏、复合节奏' });
+    goals.push({ type: 'rhythm', title: '节奏训练', desc: '基本节拍、切分节奏、复合节奏型' });
   }
   if (msg.includes('气息') || msg.includes('呼吸')) {
-    goals.push({ type: 'breath', title: '气息控制计划', desc: '腹式呼吸、长音 sustaining、乐句控制' });
+    goals.push({ type: 'breath', title: '气息控制', desc: '腹式呼吸、长音 sustaining、乐句控制' });
   }
   if (msg.includes('发声') || msg.includes('声音') || msg.includes('音色')) {
-    goals.push({ type: 'voice', title: '发声技巧计划', desc: '共鸣位置、声区统一、音色美化' });
+    goals.push({ type: 'voice', title: '发声技巧', desc: '共鸣位置、声区统一、音色美化' });
   }
   if (msg.includes('视唱') || msg.includes('识谱') || msg.includes('读谱')) {
-    goals.push({ type: 'sight', title: '视唱练耳计划', desc: '五线谱速读、首调视唱、固定调视唱' });
+    goals.push({ type: 'sight', title: '视唱练耳', desc: '五线谱速读、首调视唱、固定调视唱' });
+  }
+  if (msg.includes('音阶') || msg.includes('琶音')) {
+    goals.push({ type: 'scale', title: '音阶琶音', desc: '大调小调音阶、琶音上下行' });
   }
 
   if (goals.length === 0) return null;
@@ -747,11 +750,22 @@ app.post('/api/plans', requireAuth, (req, res) => {
 
 app.get('/api/plans', requireAuth, (req, res) => {
   const userId = req.user.id;
+  const userPart = req.user.part;
   const role = req.user.role;
   let plans = trainingPlans;
-  if (role === 'member') plans = trainingPlans.filter(p => p.userId === userId && p.type === 'personal');
-  else if (role === 'captain') plans = trainingPlans.filter(p => p.userId === userId || (p.type === 'voicePart' && p.targetPart === req.user.part));
-  // Add today's progress
+  // Everyone can see: their own personal plans + voicePart plans for their part
+  plans = trainingPlans.filter(p => {
+    if (p.type === 'personal') return p.userId === userId;
+    if (p.type === 'voicePart') {
+      // Creator, same part members, admin can see
+      if (p.userId === userId) return true;
+      if (role === 'admin') return true;
+      if (p.targetPart === userPart) return true;
+      return false;
+    }
+    return false;
+  });
+  // Add today's progress (per user)
   const today = new Date().toISOString().split('T')[0];
   const plansWithProgress = plans.map(p => {
     const progressKey = `${p.id}_${req.user.id}`;

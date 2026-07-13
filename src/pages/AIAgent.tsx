@@ -189,11 +189,13 @@ export default function AIAgent() {
   const addToPlan = async (type: 'personal' | 'voicePart') => {
     if (!planSuggestion) return;
     const token = getToken();
+    const practiceRoomTypes = ['ear_training', 'pitch', 'rhythm', 'sight'];
     const exercises = planSuggestion.goals.map(g => ({
       name: g.title,
       type: g.type,
       description: g.desc,
       duration: Math.ceil(planSuggestion.suggestedDuration / planSuggestion.goals.length),
+      practiceType: practiceRoomTypes.includes(g.type) ? 'practiceRoom' : 'custom',
     }));
 
     try {

@@ -188,16 +188,16 @@ export default function TrainingPlans() {
                             </span>
                           </div>
                           <p className="text-xs text-neutral-500 mb-2">{ex.description}</p>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             {!done ? (
                               <>
                                 <button onClick={() => goToPractice(ex)}
                                   className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 text-black rounded-lg text-xs font-medium hover:bg-amber-400">
-                                  <Play className="w-3 h-3" />去完成
+                                  <Play className="w-3 h-3" />练习室练习
                                 </button>
                                 <button onClick={() => completeExercise(selectedPlan.id, ex.id)}
                                   className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-800 text-neutral-400 rounded-lg text-xs hover:bg-neutral-700">
-                                  <CheckCircle className="w-3 h-3" />标记完成
+                                  <CheckCircle className="w-3 h-3" />自定义练习
                                 </button>
                               </>
                             ) : (
