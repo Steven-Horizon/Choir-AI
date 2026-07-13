@@ -15,11 +15,12 @@ import {
 import { getTodayWarmupExercises } from '@/lib/warmup-exercises';
 
 // ========== 登录/注册 ==========
-function AuthScreen({ onLogin, onRegister }: { onLogin: (n: string, p: string) => Promise<void>; onRegister: (n: string, p: string, part: string) => Promise<void> }) {
+function AuthScreen({ onLogin, onRegister }: { onLogin: (n: string, p: string) => Promise<void>; onRegister: (n: string, p: string, part: string, role: string) => Promise<void> }) {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   const [name, setName] = useState('');
   const [password, setPassword] = useState('');
   const [part, setPart] = useState('soprano');
+  const [role, setRole] = useState('member');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -32,7 +33,7 @@ function AuthScreen({ onLogin, onRegister }: { onLogin: (n: string, p: string) =
     setLoading(true);
     try {
       if (mode === 'login') await onLogin(name.trim(), password);
-      else await onRegister(name.trim(), password, part);
+      else await onRegister(name.trim(), password, part, role);
     } catch (err: any) { setError(err.message || '失败'); }
     setLoading(false);
   };
@@ -65,15 +66,33 @@ function AuthScreen({ onLogin, onRegister }: { onLogin: (n: string, p: string) =
           </div>
         </div>
         {mode === 'register' && (
-          <div>
-            <label className="block text-sm text-neutral-400 mb-1.5">声部</label>
-            <div className="grid grid-cols-4 gap-2">
-              {[{ k: 'soprano', l: 'S' }, { k: 'alto', l: 'A' }, { k: 'tenor', l: 'T' }, { k: 'bass', l: 'B' }].map(p => (
-                <button key={p.k} type="button" onClick={() => setPart(p.k)}
-                  className={`py-2 rounded-lg text-sm font-bold ${part === p.k ? 'bg-amber-500 text-black' : 'bg-neutral-800 text-neutral-400'}`}>{p.l}</button>
-              ))}
+          <>
+            <div>
+              <label className="block text-sm text-neutral-400 mb-1.5">声部</label>
+              <div className="grid grid-cols-4 gap-2">
+                {[{ k: 'soprano', l: 'S' }, { k: 'alto', l: 'A' }, { k: 'tenor', l: 'T' }, { k: 'bass', l: 'B' }].map(p => (
+                  <button key={p.k} type="button" onClick={() => setPart(p.k)}
+                    className={`py-2 rounded-lg text-sm font-bold ${part === p.k ? 'bg-amber-500 text-black' : 'bg-neutral-800 text-neutral-400'}`}>{p.l}</button>
+                ))}
+              </div>
             </div>
-          </div>
+            <div>
+              <label className="block text-sm text-neutral-400 mb-1.5">职务</label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { k: 'admin', l: '团干', desc: '管理全团' },
+                  { k: 'captain', l: '声部长', desc: '管理声部' },
+                  { k: 'member', l: '部员', desc: '普通成员' },
+                ].map(r => (
+                  <button key={r.k} type="button" onClick={() => setRole(r.k)}
+                    className={`py-2 px-2 rounded-lg text-sm text-center transition-all ${role === r.k ? 'bg-amber-500/20 border border-amber-500/40 text-amber-400' : 'bg-neutral-800 border border-transparent text-neutral-400'}`}>
+                    <div className="font-medium">{r.l}</div>
+                    <div className="text-[10px] opacity-60">{r.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </>
         )}
         <button type="submit" disabled={loading}
           className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-black font-semibold rounded-xl transition-colors disabled:opacity-50">
@@ -395,6 +414,6 @@ export default function Dashboard() {
   const voicePart = user?.part || localStorage.getItem('choirai_voice_part') || 'soprano';
 
   if (loading) return <div className="flex items-center justify-center h-screen text-neutral-500">加载中...</div>;
-  if (!isLoggedIn) return <div className="text-white"><AuthScreen onLogin={login} onRegister={register} /></div>;
+  if (!isLoggedIn) return <div className="text-white"><AuthScreen onLogin={login} onRegister={(n, p, pt, r) => register(n, p, pt, r)} /></div>;
   return <div className="text-white"><HomeScreen userName={user?.name || ''} voicePart={voicePart} isAdmin={isAdmin} /></div>;
 }

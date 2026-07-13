@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, Users, Plus, UserPlus, Send, CheckCircle, Trash2, Lock } from 'lucide-react';
+import { ArrowLeft, Users, Plus, UserPlus, Send, CheckCircle, Trash2, Lock, LogIn } from 'lucide-react';
 import { API_BASE } from '@/config';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface VoicePart {
   id: string;
@@ -22,11 +23,13 @@ interface Task {
   createdAt: string;
 }
 
-function getUserName(): string {
-  try { const u = JSON.parse(localStorage.getItem('choir_user') || '{}'); return u.name || '我'; } catch { return '我'; }
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem('choirai_token');
+  return token ? { 'Content-Type': 'application/json', 'x-auth-token': token } : { 'Content-Type': 'application/json' };
 }
 
 export default function VoicePartManager() {
+  const { user, isLoggedIn } = useAuth();
   const [parts, setParts] = useState<VoicePart[]>([]);
   const [view, setView] = useState<'list' | 'detail' | 'create' | 'join'>('list');
   const [selectedPart, setSelectedPart] = useState<VoicePart | null>(null);
@@ -41,7 +44,7 @@ export default function VoicePartManager() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const userName = getUserName();
+  const userName = user?.name || '我';
 
   // Load parts from backend on mount
   useEffect(() => { fetchParts(); }, []);
@@ -71,6 +74,7 @@ export default function VoicePartManager() {
   };
 
   const createPart = async () => {
+    if (!isLoggedIn) { setError('请先登录'); return; }
     if (!newName.trim() || !newPassword.trim()) {
       setError('请输入声部名称和密码');
       return;
@@ -80,7 +84,7 @@ export default function VoicePartManager() {
     try {
       const res = await fetch(`${API_BASE}/api/voice-parts`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ name: newName.trim(), password: newPassword, creator: userName }),
       });
       if (!res.ok) {
@@ -108,7 +112,7 @@ export default function VoicePartManager() {
     try {
       const res = await fetch(`${API_BASE}/api/voice-parts/${joinCode.trim()}/join`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ password: joinPassword, memberName: userName }),
       });
       if (!res.ok) {
@@ -131,7 +135,7 @@ export default function VoicePartManager() {
     try {
       const res = await fetch(`${API_BASE}/api/voice-parts/${selectedPart.id}/tasks`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ title: taskTitle, type: taskType, assignee: taskAssignee || '全体成员' }),
       });
       if (res.ok) {
@@ -165,7 +169,7 @@ export default function VoicePartManager() {
 
   const deletePart = async (id: string) => {
     try {
-      const res = await fetch(`${API_BASE}/api/voice-parts/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/api/voice-parts/${id}`, { method: 'DELETE', headers: getAuthHeaders() });
       if (res.ok) {
         setParts(parts.filter(p => p.id !== id));
         if (selectedPart?.id === id) { setSelectedPart(null); setView('list'); }
@@ -241,6 +245,11 @@ export default function VoicePartManager() {
         <div className="w-full max-w-md">
           <button onClick={() => setView('list')} className="text-neutral-500 hover:text-white mb-6"><ArrowLeft className="w-5 h-5" /></button>
           <h2 className="text-xl font-bold mb-6">创建声部</h2>
+          {!isLoggedIn && (
+            <div className="mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center gap-2 text-sm text-red-400">
+              <LogIn className="w-4 h-4" />请先登录后再创建声部
+            </div>
+          )}
           <div className="space-y-4">
             <div>
               <label className="block text-sm text-neutral-400 mb-1.5">声部名称</label>

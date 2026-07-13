@@ -2,15 +2,18 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   ArrowLeft, CheckCircle, Sun, Moon,
-  Clock, RefreshCw, Wind, ChevronDown, ChevronUp
+  Clock, RefreshCw, Wind, ChevronDown, ChevronUp, Shield, Eye
 } from 'lucide-react';
 import {
   WARMUP_EXERCISES, WARMUP_SONGS, VOICE_PART_TIPS,
   getTodayWarmupExercises,
 } from '@/lib/warmup-exercises';
 import { recordPractice } from '@/lib/ai-coach';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function WarmUpRoom() {
+  const { isLoggedIn, isAdmin, isCaptain } = useAuth();
+  const canCheck = isAdmin || isCaptain; // 只有团干和声部长能勾选
   const [voicePart, setVoicePart] = useState('soprano');
   const [completed, setCompleted] = useState<Set<string>>(new Set());
   const [tod, setTod] = useState<'morning'|'evening'>(() => { const h = new Date().getHours(); return h >= 6 && h < 18 ? 'morning' : 'evening'; });
@@ -41,6 +44,7 @@ export default function WarmUpRoom() {
   }, [timerOn]);
 
   const toggle = (id: string) => {
+    if (!canCheck) return; // 部员不能勾选
     setCompleted(prev => {
       const n = new Set(prev);
       n.has(id) ? n.delete(id) : n.add(id);
@@ -106,6 +110,18 @@ export default function WarmUpRoom() {
           {voicePart === 'soprano' ? '女高音' : voicePart === 'alto' ? '女低音' : voicePart === 'tenor' ? '男高音' : '男低音'}提示：{tips[0]}
         </div>
 
+        {/* 权限提示 */}
+        {!canCheck && isLoggedIn && (
+          <div className="mb-3 p-2.5 bg-neutral-800/50 rounded-lg border border-neutral-700/50 flex items-center gap-2 text-xs text-neutral-500">
+            <Eye className="w-3.5 h-3.5" />你是部员，只能查看开声条目
+          </div>
+        )}
+        {canCheck && (
+          <div className="mb-3 p-2.5 bg-amber-500/5 rounded-lg border border-amber-500/10 flex items-center gap-2 text-xs text-amber-400">
+            <Shield className="w-3.5 h-3.5" />你是{isAdmin ? '团干' : '声部长'}，可以勾选确认开声条目
+          </div>
+        )}
+
         {/* 今日5条 */}
         <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
           {tod === 'morning' ? <Sun className="w-4 h-4 text-orange-400" /> : <Moon className="w-4 h-4 text-indigo-400" />}
@@ -116,10 +132,14 @@ export default function WarmUpRoom() {
           {list.map((ex, i) => {
             const done = completed.has(ex.id);
             return (
-              <button key={ex.id} onClick={() => toggle(ex.id)}
-                className={`w-full flex items-start gap-3 p-3.5 rounded-xl border text-left transition-all ${done ? 'bg-green-500/5 border-green-500/20' : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700'}`}>
+              <button key={ex.id} onClick={() => toggle(ex.id)} disabled={!canCheck}
+                className={`w-full flex items-start gap-3 p-3.5 rounded-xl border text-left transition-all ${
+                  done ? 'bg-green-500/5 border-green-500/20' : 
+                  canCheck ? 'bg-neutral-900 border-neutral-800 hover:border-neutral-700' : 'bg-neutral-900/50 border-neutral-800/50'
+                } ${!canCheck ? 'cursor-default' : ''}`}>
                 <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${done ? 'bg-green-500/20' : 'bg-neutral-800'}`}>
-                  {done ? <CheckCircle className="w-4 h-4 text-green-400" /> : <span className="text-xs text-neutral-500">{i+1}</span>}
+                  {done ? <CheckCircle className="w-4 h-4 text-green-400" /> : 
+                   canCheck ? <span className="text-xs text-neutral-500">{i+1}</span> : <Eye className="w-3.5 h-3.5 text-neutral-600" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className={`text-sm font-medium ${done ? 'text-green-400 line-through' : 'text-neutral-200'}`}>{ex.name}</div>

@@ -13,7 +13,7 @@ interface AuthCtxType {
   isAdmin: boolean;
   isCaptain: boolean;
   loading: boolean;
-  register: (name: string, password: string, part: string) => Promise<void>;
+  register: (name: string, password: string, part: string, role?: string) => Promise<void>;
   login: (name: string, password: string) => Promise<void>;
   logout: () => void;
   refresh: () => void;
@@ -46,10 +46,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => { checkAuth(); }, [checkAuth]);
 
-  const register = useCallback(async (name: string, password: string, part: string) => {
+  const register = useCallback(async (name: string, password: string, part: string, role?: string) => {
     const res = await fetch('/api/auth/register', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, password, part, role: 'member' }),
+      body: JSON.stringify({ name, password, part, role: role || 'member' }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '注册失败');
