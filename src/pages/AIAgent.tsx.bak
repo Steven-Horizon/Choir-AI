@@ -210,13 +210,8 @@ export default function AIAgent() {
       if (res.ok) {
         alert(type === 'personal' ? '已添加到个人计划！' : '已添加到声部计划！');
         setPlanSuggestion(null);
-      } else {
-        const err = await res.json().catch(() => ({}));
-        alert('添加失败：' + (err.error || '请检查登录状态'));
       }
-    } catch {
-      alert('网络错误，请重试');
-    }
+    } catch {}
   };
 
   const handleSend = async () => {

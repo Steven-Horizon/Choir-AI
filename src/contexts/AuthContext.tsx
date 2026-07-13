@@ -35,9 +35,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const res = await fetch('/api/auth/me', { headers: { 'x-auth-token': token } });
       if (!res.ok) throw new Error();
       const data = await res.json();
+      localStorage.setItem('choirai_user', JSON.stringify({ id: data.id, name: data.name }));
       setUser(data);
     } catch {
       localStorage.removeItem('choirai_token');
+      localStorage.removeItem('choirai_user');
       setUser(null);
     } finally {
       setLoading(false);
@@ -55,6 +57,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!res.ok) throw new Error(data.error || '注册失败');
     localStorage.setItem('choirai_token', data.token);
     localStorage.setItem('choirai_voice_part', data.user.part);
+    localStorage.setItem('choirai_user', JSON.stringify({ id: data.user.id, name: data.user.name }));
     setUser(data.user);
   }, []);
 
@@ -67,6 +70,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!res.ok) throw new Error(data.error || '登录失败');
     localStorage.setItem('choirai_token', data.token);
     localStorage.setItem('choirai_voice_part', data.user.part);
+    localStorage.setItem('choirai_user', JSON.stringify({ id: data.user.id, name: data.user.name }));
     setUser(data.user);
   }, []);
 

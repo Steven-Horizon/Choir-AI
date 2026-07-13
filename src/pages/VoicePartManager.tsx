@@ -29,7 +29,8 @@ function getAuthHeaders(): Record<string, string> {
 }
 
 export default function VoicePartManager() {
-  const { user, isLoggedIn } = useAuth();
+  const { user, isLoggedIn, isAdmin, isCaptain } = useAuth();
+  const canManageTasks = isAdmin || isCaptain; // 只有团干和声部长能发任务
   const [parts, setParts] = useState<VoicePart[]>([]);
   const [view, setView] = useState<'list' | 'detail' | 'create' | 'join'>('list');
   const [selectedPart, setSelectedPart] = useState<VoicePart | null>(null);
@@ -341,7 +342,7 @@ export default function VoicePartManager() {
       <div className="bg-neutral-900 rounded-xl border border-neutral-800 p-4">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-sm font-medium">任务列表</h3>
-          {isMember && (
+          {canManageTasks && (
             <button onClick={() => setShowTaskForm(!showTaskForm)}
               className="flex items-center gap-1.5 text-xs bg-amber-500/15 text-amber-400 px-3 py-1.5 rounded-lg hover:bg-amber-500/25">
               <Send className="w-3.5 h-3.5" />发任务
@@ -349,7 +350,7 @@ export default function VoicePartManager() {
           )}
         </div>
 
-        {showTaskForm && isMember && (
+        {showTaskForm && canManageTasks && (
           <div className="bg-neutral-800/50 rounded-lg p-3 mb-4 space-y-3">
             <input value={taskTitle} onChange={e => setTaskTitle(e.target.value)} placeholder="任务内容"
               className="w-full bg-neutral-800 border border-neutral-700 rounded px-3 py-2 text-sm focus:border-amber-500 outline-none" />
