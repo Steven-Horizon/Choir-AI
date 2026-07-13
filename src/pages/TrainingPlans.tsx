@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft, Target, Plus, Trash2, CheckCircle, Clock,
-  User, Users, Loader2, ChevronRight, Play, RotateCcw,
-  Calendar, ArrowRight
+  ArrowLeft, Target, Trash2, CheckCircle, Clock,
+  Loader2, ChevronRight, Play, Calendar
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { API_BASE } from '@/config';
@@ -33,10 +32,6 @@ interface Plan {
   currentDay?: number;
 }
 
-const PART_LABELS: Record<string, string> = {
-  soprano: '女高音', alto: '女低音', tenor: '男高音', bass: '男低音'
-};
-
 const TYPE_NAMES: Record<string, string> = {
   ear_training: '听力训练', pitch: '音准练习', rhythm: '节奏练习',
   breath: '气息控制', voice: '发声技巧', sight: '视唱练耳', scale: '音阶练习'
@@ -46,7 +41,7 @@ function getToken() { return localStorage.getItem('choirai_token') || ''; }
 
 export default function TrainingPlans() {
   const navigate = useNavigate();
-  const { user, isLoggedIn, isAdmin, isCaptain } = useAuth();
+  const { isLoggedIn } = useAuth();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
   const [todayExercises, setTodayExercises] = useState<Exercise[]>([]);
