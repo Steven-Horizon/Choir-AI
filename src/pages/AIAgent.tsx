@@ -39,11 +39,18 @@ interface PlanSuggestion {
 
 function getToken() { return localStorage.getItem('choirai_token') || ''; }
 
+function getUserKey(): string {
+  // Use user-specific key to isolate sessions per user
+  const userStr = localStorage.getItem('choirai_user');
+  const userId = userStr ? JSON.parse(userStr)?.id || 'guest' : 'guest';
+  return `choirai_chat_${userId}`;
+}
+
 function loadLocalSessions(): ChatSession[] {
-  try { return JSON.parse(localStorage.getItem('choirai_chat_sessions') || '[]'); } catch { return []; }
+  try { return JSON.parse(localStorage.getItem(getUserKey()) || '[]'); } catch { return []; }
 }
 function saveLocalSessions(sessions: ChatSession[]) {
-  localStorage.setItem('choirai_chat_sessions', JSON.stringify(sessions));
+  localStorage.setItem(getUserKey(), JSON.stringify(sessions));
 }
 
 const WELCOME_MSG: ChatMessage = {

@@ -349,8 +349,8 @@ export default function ScoreLibrary() {
                     </a>
                   </div>
                 ) : isPdf(preview.file_path) ? (
-                  <div className="w-full h-full">
-                    <embed src={`${API_BASE}${preview.file_path}`} type="application/pdf" width="100%" height="100%" className="rounded-lg" />
+                  <div className="w-full h-full min-h-[60vh]">
+                    <iframe src={`${API_BASE}${preview.file_path}`} width="100%" height="100%" className="rounded-lg min-h-[60vh] border-0" title={preview.title} />
                   </div>
                 ) : isImage(preview.file_path) ? (
                   <img src={`${API_BASE}${preview.file_path}`} alt={preview.title} className="max-w-full max-h-[70vh] mx-auto rounded-lg" />

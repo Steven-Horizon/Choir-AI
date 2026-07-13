@@ -512,46 +512,34 @@ app.delete('/api/voice-parts/:id', requireAuth, (req, res) => {
   res.json({ success: true });
 });
 
-app.post('/api/voice-parts/:id/tasks', (req, res) => {
+app.post('/api/voice-parts/:id/tasks', requireAuth, (req, res) => {
+  // Only admin and captain can send tasks
+  if (req.user.role !== 'admin' && req.user.role !== 'captain') {
+    return res.status(403).json({ error: '只有团干和声部长可以派发任务' });
+  }
   const part = voiceParts.find(p => p.id === req.params.id);
   if (!part) return res.status(404).json({ error: 'Not found' });
   const { title, type, assignee } = req.body;
   if (!title) return res.status(400).json({ error: 'Title required' });
-  const task = { id: 'task_' + Date.now(), title, type: type || 'practice', assignee: assignee || '全体成员', completed: false, createdAt: new Date().toLocaleDateString() };
+  const task = { id: 'task_' + Date.now(), title, type: type || 'practice', assignee: assignee || '全体成员', completed: false, createdBy: req.user.name, createdAt: new Date().toLocaleDateString() };
   part.tasks.push(task);
+  saveData('voiceParts.json', voiceParts);
   res.json(task);
 });
 
-app.patch('/api/voice-parts/:partId/tasks/:taskId', (req, res) => {
+app.patch('/api/voice-parts/:partId/tasks/:taskId', requireAuth, (req, res) => {
   const part = voiceParts.find(p => p.id === req.params.partId);
   if (!part) return res.status(404).json({ error: 'Not found' });
   const task = part.tasks.find(t => t.id === req.params.taskId);
   if (!task) return res.status(404).json({ error: 'Task not found' });
+  // Members can only complete their own tasks, captains/admin can toggle any
+  if (req.user.role === 'member' && task.assignee !== req.user.name && task.assignee !== '全体成员') {
+    return res.status(403).json({ error: '只能完成分配给自己的任务' });
+  }
   task.completed = !task.completed;
+  saveData('voiceParts.json', voiceParts);
   res.json(task);
 });
-
-// =================== TRAINING PLANS ===================
-app.post('/api/plans/sync', (req, res) => {
-  const { items } = req.body;
-  if (!Array.isArray(items)) return res.status(400).json({ error: 'items must be array' });
-  items.forEach(item => {
-    if (!trainingPlans.find(p => p.id === item.id)) trainingPlans.push(item);
-  });
-  res.json({ success: true, count: trainingPlans.length });
-});
-
-app.post('/api/plans', (req, res) => {
-  const { title, scoreName, parts, startDate, endDate, phases, creator } = req.body;
-  if (!title || !scoreName || !parts || parts.length === 0) return res.status(400).json({ error: 'Title, scoreName and parts required' });
-  const plan = { id: 'plan_' + Date.now(), title, scoreName, parts, startDate: startDate || new Date().toLocaleDateString(), endDate: endDate || new Date(Date.now() + 14 * 86400000).toLocaleDateString(), phases: phases || [], creator: creator || 'unknown', shared: true, createdAt: new Date().toISOString() };
-  trainingPlans.push(plan);
-  res.json(plan);
-});
-
-app.get('/api/plans', (req, res) => { res.json(trainingPlans.filter(p => p.shared)); });
-app.get('/api/plans/:id', (req, res) => { const p = trainingPlans.find(x => x.id === req.params.id); if (!p) return res.status(404).json({ error: 'Not found' }); res.json(p); });
-app.delete('/api/plans/:id', (req, res) => { const idx = trainingPlans.findIndex(p => p.id === req.params.id); if (idx === -1) return res.status(404); trainingPlans.splice(idx, 1); res.json({ success: true }); });
 
 // =================== CHAT - Kimi API (supports images) ===================
 function callKimi(msgs, apiKey) {
