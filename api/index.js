@@ -666,7 +666,6 @@ function runAudiveris(inputPath, outputDir) {
 
       resolve(path.join(outputDir, mxlFile));
     });
-    });
   });
 }
 
@@ -721,3 +720,4 @@ app.listen(PORT, () => {
 });
 
 module.exports = app;
+// deploy trigger 1783924691
