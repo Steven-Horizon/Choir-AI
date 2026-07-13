@@ -1,9 +1,58 @@
-// Vercel Serverless Function - ChoirAI Backend
+// ChoirAI Backend
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
+const fs = require('fs');
 const { parseMidi } = require('midi-file');
+
+// =================== DATA PERSISTENCE ===================
+const DATA_DIR = path.join(__dirname, '..', 'data');
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
+function loadData(filename, fallback) {
+  const fp = path.join(DATA_DIR, filename);
+  if (fs.existsSync(fp)) { try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch {} }
+  return fallback;
+}
+function saveData(filename, data) {
+  fs.writeFileSync(path.join(DATA_DIR, filename), JSON.stringify(data, null, 2));
+}
+
+// =================== USER SYSTEM ===================
+// roles: admin (团干), captain (声部长), member (部员)
+let users = loadData('users.json', []);
+let userIdCounter = users.length > 0 ? Math.max(...users.map(u => parseInt(u.id.replace('u_', '')) || 0)) + 1 : 1;
+const sessions = {}; // token -> { userId, createdAt }
+
+function hashPwd(pwd) { return crypto.createHash('sha256').update(pwd).digest('hex'); }
+function genToken() { return crypto.randomBytes(32).toString('hex'); }
+
+function getUser(req) {
+  const token = req.headers['x-auth-token'] || req.query.token;
+  if (!token) return null;
+  const s = sessions[token];
+  if (!s) return null;
+  return users.find(u => u.id === s.userId) || null;
+}
+
+function requireAuth(req, res, next) {
+  const user = getUser(req);
+  if (!user) return res.status(401).json({ error: '请先登录' });
+  req.user = user;
+  next();
+}
+
+function requireRole(roles) {
+  return (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: '请先登录' });
+    if (!roles.includes(req.user.role)) return res.status(403).json({ error: '权限不足' });
+    next();
+  };
+}
+
+// =================== MUSICXML PARSER ===================
 
 // =================== MUSICXML PARSER ===================
 function parseMusicXML(xmlString) {
@@ -164,14 +213,14 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// =================== IN-MEMORY STORAGE ===================
-const scores = [];
-const sessions = [];
-const messages = [];
-const voiceParts = [];
-const trainingPlans = [];
-const planProgress = {};
+// =================== IN-MEMORY STORAGE (with persistence) ===================
+const scores = loadData('scores.json', []);
+const messages = loadData('messages.json', []);
+let voiceParts = loadData('voiceParts.json', []);
+const trainingPlans = loadData('trainingPlans.json', []);
+const planProgress = loadData('planProgress.json', {});
 const fileStorage = {};
+const rehearsalRecords = loadData('rehearsalRecords.json', []);
 
 // =================== MIDI PARSER ===================
 function parseMidiFile(base64Data) {
@@ -421,12 +470,13 @@ app.post('/api/voice-parts/sync', (req, res) => {
   res.json({ success: true, count: voiceParts.length });
 });
 
-app.post('/api/voice-parts', (req, res) => {
-  const { name, password, creator } = req.body;
+app.post('/api/voice-parts', requireAuth, (req, res) => {
+  const { name, password } = req.body;
   if (!name || !password) return res.status(400).json({ error: 'Name and password required' });
   const code = Math.random().toString(36).slice(2, 8).toUpperCase();
-  const part = { id: 'vp_' + Date.now(), name, code, password, creator: creator || 'unknown', members: [creator || 'unknown'], tasks: [], createdAt: new Date().toISOString() };
+  const part = { id: 'vp_' + Date.now(), name, code, password, creator: req.user.name, creatorId: req.user.id, members: [req.user.name], tasks: [], createdAt: new Date().toISOString() };
   voiceParts.push(part);
+  saveData('voiceParts.json', voiceParts);
   res.json({ id: part.id, name: part.name, code: part.code, creator: part.creator, members: part.members, tasks: part.tasks, createdAt: part.createdAt });
 });
 
@@ -450,10 +500,15 @@ app.get('/api/voice-parts/:id', (req, res) => {
   res.json({ id: part.id, name: part.name, code: part.code, creator: part.creator, members: part.members, tasks: part.tasks, createdAt: part.createdAt });
 });
 
-app.delete('/api/voice-parts/:id', (req, res) => {
-  const idx = voiceParts.findIndex(p => p.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Not found' });
-  voiceParts.splice(idx, 1);
+app.delete('/api/voice-parts/:id', requireAuth, (req, res) => {
+  const part = voiceParts.find(p => p.id === req.params.id);
+  if (!part) return res.status(404).json({ error: 'Not found' });
+  // Only creator or admin can delete
+  if (part.creatorId !== req.user.id && req.user.role !== 'admin') {
+    return res.status(403).json({ error: '只有创建者或团干可以删除声部' });
+  }
+  voiceParts = voiceParts.filter(p => p.id !== req.params.id);
+  saveData('voiceParts.json', voiceParts);
   res.json({ success: true });
 });
 
@@ -610,104 +665,128 @@ app.get('/api/chat/sessions', (req, res) => {
   res.json(unique.map(id => ({ id, title: messages.find(m => m.session_id === id && m.role === 'user')?.content?.slice(0, 30) || '新会话', created_at: messages.find(m => m.session_id === id)?.created_at })));
 });
 
-// =================== PDF TO MUSICXML (Audiveris) ===================
-const { exec } = require('child_process');
-const fs = require('fs');
-
-function runAudiveris(inputPath, outputDir) {
-  return new Promise((resolve, reject) => {
-    const fs = require('fs');
-    const { execSync } = require('child_process');
-
-    // Search for Audiveris binary in common paths
-    let audiverisPath = null;
-    const possiblePaths = [
-      '/app/audiveris/bin/Audiveris',
-      '/app/audiveris/usr/bin/Audiveris',
-      '/usr/bin/Audiveris',
-    ];
-
-    for (const p of possiblePaths) {
-      try {
-        if (fs.existsSync(p)) {
-          audiverisPath = p;
-          break;
-        }
-      } catch { /* ignore */ }
-    }
-
-    // Try 'which' command
-    if (!audiverisPath) {
-      try {
-        audiverisPath = execSync('which Audiveris', { encoding: 'utf8' }).trim();
-      } catch { /* ignore */ }
-    }
-
-    if (!audiverisPath) {
-      reject(new Error('Audiveris not installed. Please install from https://github.com/Audiveris/audiveris'));
-      return;
-    }
-
-    console.log(`Found Audiveris at: ${audiverisPath}`);
-
-    const cmd = `"${audiverisPath}" -batch -export MusicXML -output "${outputDir}" "${inputPath}"`;
-    exec(cmd, { timeout: 120000 }, (error, stdout, stderr) => {
-      if (error) {
-        reject(new Error(`Audiveris failed: ${stderr || error.message}`));
-        return;
-      }
-
-      const files = fs.readdirSync(outputDir);
-      const mxlFile = files.find(f => f.endsWith('.mxl'));
-      if (!mxlFile) {
-        reject(new Error('No MusicXML output generated'));
-        return;
-      }
-
-      resolve(path.join(outputDir, mxlFile));
-    });
-  });
-}
-
-app.post('/api/convert/pdf-to-musicxml', async (req, res) => {
-  const { fileData, fileName } = req.body;
-  if (!fileData || !fileName) return res.status(400).json({ error: 'fileData and fileName required' });
-
-  try {
-    // Save PDF temporarily
-    const tmpDir = `/tmp/audiveris_${Date.now()}`;
-    fs.mkdirSync(tmpDir, { recursive: true });
-    const inputPath = path.join(tmpDir, fileName);
-    fs.writeFileSync(inputPath, Buffer.from(fileData, 'base64'));
-
-    // Run Audiveris
-    const outputPath = await runAudiveris(inputPath, tmpDir);
-
-    // Read output MusicXML
-    const mxlBuffer = fs.readFileSync(outputPath);
-
-    // Parse and return
-    const xmlContent = mxlBuffer.toString('utf-8');
-
-    // Clean up
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-
-    res.json({
-      success: true,
-      xmlData: xmlContent,
-      message: 'Conversion successful'
-    });
-  } catch (err) {
-    res.status(500).json({
-      error: err.message,
-      fallback: 'Please use Audiveris locally: https://github.com/Audiveris/audiveris'
-    });
-  }
+// =================== REHEARSAL RECORDINGS ===================
+app.post('/api/rehearsal/record', requireAuth, (req, res) => {
+  const { scoreId, scoreTitle, startMeasure, endMeasure, bpm, records } = req.body;
+  const record = {
+    id: 'rec_' + Date.now(),
+    userId: req.user.id,
+    userName: req.user.name,
+    userPart: req.user.part || '',
+    scoreId: scoreId || '',
+    scoreTitle: scoreTitle || '',
+    startMeasure: startMeasure || 1,
+    endMeasure: endMeasure || 1,
+    bpm: bpm || 72,
+    records: records || [], // [{partKey, volume, cents, timestamp}]
+    createdAt: new Date().toISOString(),
+  };
+  rehearsalRecords.push(record);
+  saveData('rehearsalRecords.json', rehearsalRecords);
+  res.json({ success: true, id: record.id });
 });
 
-// =================== REHEARSAL ===================
-app.post('/api/rehearsal/start', (req, res) => { res.json({ id: Date.now() }); });
-app.get('/api/rehearsal/records', (req, res) => { res.json([]); });
+app.get('/api/rehearsal/records', requireAuth, (req, res) => {
+  // Admin sees all, captain/member sees their own and their voice part members'
+  let records = rehearsalRecords;
+  if (req.user.role !== 'admin') {
+    records = rehearsalRecords.filter(r => r.userId === req.user.id);
+  }
+  res.json(records.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 50));
+});
+
+app.get('/api/rehearsal/stats', requireAuth, (req, res) => {
+  // Return stats grouped by user for admin view
+  if (req.user.role !== 'admin') {
+    const mine = rehearsalRecords.filter(r => r.userId === req.user.id);
+    res.json({ totalRehearsals: mine.length, totalMinutes: Math.round(mine.reduce((s, r) => s + ((r.records?.length || 0) * 2), 0) / 60) });
+    return;
+  }
+  const userStats = {};
+  rehearsalRecords.forEach(r => {
+    if (!userStats[r.userId]) userStats[r.userId] = { name: r.userName, part: r.userPart, count: 0 };
+    userStats[r.userId].count++;
+  });
+  res.json({ totalRehearsals: rehearsalRecords.length, userStats: Object.values(userStats) });
+});
+
+// =================== USER AUTH ===================
+app.post('/api/auth/register', (req, res) => {
+  const { name, password, part, role } = req.body;
+  if (!name || !password) return res.status(400).json({ error: '姓名和密码必填' });
+  if (name.length < 2 || name.length > 20) return res.status(400).json({ error: '姓名2-20字' });
+  if (password.length < 4) return res.status(400).json({ error: '密码至少4位' });
+  if (users.find(u => u.name === name)) return res.status(409).json({ error: '该姓名已被注册' });
+
+  const userRole = ['admin', 'captain', 'member'].includes(role) ? role : 'member';
+  const user = {
+    id: 'u_' + (userIdCounter++),
+    name: name.trim(),
+    password: hashPwd(password),
+    part: part || 'soprano',
+    role: userRole,
+    createdAt: new Date().toISOString(),
+  };
+  users.push(user);
+  saveData('users.json', users);
+
+  const token = genToken();
+  sessions[token] = { userId: user.id, createdAt: Date.now() };
+  res.json({ token, user: { id: user.id, name: user.name, part: user.part, role: user.role } });
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const { name, password } = req.body;
+  if (!name || !password) return res.status(400).json({ error: '姓名和密码必填' });
+  const user = users.find(u => u.name === name.trim());
+  if (!user || user.password !== hashPwd(password)) return res.status(401).json({ error: '姓名或密码错误' });
+
+  const token = genToken();
+  sessions[token] = { userId: user.id, createdAt: Date.now() };
+  res.json({ token, user: { id: user.id, name: user.name, part: user.part, role: user.role } });
+});
+
+app.get('/api/auth/me', (req, res) => {
+  const user = getUser(req);
+  if (!user) return res.status(401).json({ error: '未登录' });
+  res.json({ id: user.id, name: user.name, part: user.part, role: user.role });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  const token = req.headers['x-auth-token'];
+  if (token) delete sessions[token];
+  res.json({ success: true });
+});
+
+// =================== ADMIN ===================
+app.get('/api/admin/users', requireAuth, requireRole(['admin']), (req, res) => {
+  res.json(users.map(u => ({ id: u.id, name: u.name, part: u.part, role: u.role, createdAt: u.createdAt })));
+});
+
+app.patch('/api/admin/users/:id/role', requireAuth, requireRole(['admin']), (req, res) => {
+  const { role } = req.body;
+  const user = users.find(u => u.id === req.params.id);
+  if (!user) return res.status(404).json({ error: '用户不存在' });
+  if (!['admin', 'captain', 'member'].includes(role)) return res.status(400).json({ error: '无效角色' });
+  user.role = role;
+  saveData('users.json', users);
+  res.json({ success: true, user: { id: user.id, name: user.name, role: user.role } });
+});
+
+app.get('/api/admin/stats', requireAuth, requireRole(['admin']), (req, res) => {
+  const userStats = {};
+  rehearsalRecords.forEach(r => {
+    if (!userStats[r.userId]) userStats[r.userId] = { name: r.userName, part: r.userPart, rehearsals: 0 };
+    userStats[r.userId].rehearsals++;
+  });
+  res.json({
+    totalUsers: users.length,
+    totalScores: scores.length,
+    totalVoiceParts: voiceParts.length,
+    totalRehearsals: rehearsalRecords.length,
+    userStats: Object.values(userStats),
+  });
+});
 
 // =================== SERVE FRONTEND ===================
 app.use(express.static(path.join(__dirname, '..', 'dist')));
@@ -720,4 +799,3 @@ app.listen(PORT, () => {
 });
 
 module.exports = app;
-// deploy trigger 1783924691
