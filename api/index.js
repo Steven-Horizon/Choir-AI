@@ -213,13 +213,32 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
+// =================== FILE STORAGE ===================
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+
+function saveUpload(safeName, fileData, fileType, originalName) {
+  const buffer = Buffer.from(fileData, 'base64');
+  fs.writeFileSync(path.join(UPLOADS_DIR, safeName), buffer);
+  const meta = loadData('uploads_meta.json', {});
+  meta[safeName] = { type: fileType || 'application/octet-stream', name: originalName, size: buffer.length };
+  saveData('uploads_meta.json', meta);
+}
+
+function getUpload(safeName) {
+  const filePath = path.join(UPLOADS_DIR, safeName);
+  if (!fs.existsSync(filePath)) return null;
+  const meta = loadData('uploads_meta.json', {})[safeName] || {};
+  return { path: filePath, type: meta.type || 'application/octet-stream', name: meta.name || safeName };
+}
+
 // =================== IN-MEMORY STORAGE (with persistence) ===================
 const scores = loadData('scores.json', []);
 const messages = loadData('messages.json', []);
 let voiceParts = loadData('voiceParts.json', []);
 const trainingPlans = loadData('trainingPlans.json', []);
 const planProgress = loadData('planProgress.json', {});
-const fileStorage = {};
+const fileStorage = {}; // Legacy, kept for compatibility
 const rehearsalRecords = loadData('rehearsalRecords.json', []);
 
 // =================== MIDI PARSER ===================
@@ -366,7 +385,7 @@ app.post('/api/scores', (req, res) => {
     const ext = path.extname(fileName) || '';
     const safeName = Date.now() + '-' + Math.random().toString(36).slice(2) + ext;
     file_path = `/uploads/${safeName}`;
-    fileStorage[safeName] = { data: fileData, type: fileType || 'application/octet-stream', name: fileName };
+    saveUpload(safeName, fileData, fileType, fileName);
 
     // Parse MIDI if it's a MIDI file
     if (ext.toLowerCase() === '.mid' || ext.toLowerCase() === '.midi' || fileType === 'audio/midi') {
@@ -452,12 +471,21 @@ function generateScoreParts(title) {
 }
 
 app.get('/uploads/:filename', (req, res) => {
-  const file = fileStorage[req.params.filename];
-  if (!file) return res.status(404).json({ error: 'File not found' });
-  const buffer = Buffer.from(file.data, 'base64');
+  const file = getUpload(req.params.filename);
+  if (!file) {
+    // Fallback: try legacy memory storage
+    const legacy = fileStorage[req.params.filename];
+    if (legacy) {
+      const buffer = Buffer.from(legacy.data, 'base64');
+      res.setHeader('Content-Type', legacy.type);
+      res.setHeader('Content-Disposition', `inline; filename="${legacy.name}"`);
+      return res.send(buffer);
+    }
+    return res.status(404).json({ error: 'File not found' });
+  }
   res.setHeader('Content-Type', file.type);
   res.setHeader('Content-Disposition', `inline; filename="${file.name}"`);
-  res.send(buffer);
+  res.sendFile(file.path);
 });
 
 // =================== VOICE PARTS ===================
@@ -688,16 +716,28 @@ function detectTrainingPlan(userMsg, aiReply) {
 }
 
 // =================== TRAINING PLANS ===================
+function getCurrentDayIndex(plan) {
+  const start = new Date(plan.createdAt);
+  const now = new Date();
+  const daysDiff = Math.floor((now.getTime() - start.getTime()) / 86400000);
+  return Math.max(0, Math.min(daysDiff, (plan.daysTotal || 1) - 1));
+}
+
 app.post('/api/plans', requireAuth, (req, res) => {
-  const { title, type, exercises, targetPart } = req.body;
+  const { title, type, exercises, targetPart, daysTotal } = req.body;
+  const exercisesWithDays = (exercises || []).map((ex, i) => ({
+    ...ex, id: ex.id || `ex_${Date.now()}_${i}`,
+    dayIndex: Math.floor(i / 3),
+    completed: false,
+  }));
   const plan = {
     id: 'plan_' + Date.now(),
-    userId: req.user.id,
-    userName: req.user.name,
+    userId: req.user.id, userName: req.user.name,
     title: title || '未命名计划',
-    type: type || 'personal', // 'personal' or 'voicePart'
+    type: type || 'personal',
     targetPart: targetPart || req.user.part,
-    exercises: exercises || [],
+    exercises: exercisesWithDays,
+    daysTotal: daysTotal || Math.ceil(exercisesWithDays.length / 3) || 1,
     createdAt: new Date().toISOString(),
   };
   trainingPlans.push(plan);
@@ -709,27 +749,57 @@ app.get('/api/plans', requireAuth, (req, res) => {
   const userId = req.user.id;
   const role = req.user.role;
   let plans = trainingPlans;
+  if (role === 'member') plans = trainingPlans.filter(p => p.userId === userId && p.type === 'personal');
+  else if (role === 'captain') plans = trainingPlans.filter(p => p.userId === userId || (p.type === 'voicePart' && p.targetPart === req.user.part));
+  // Add today's progress
+  const today = new Date().toISOString().split('T')[0];
+  const plansWithProgress = plans.map(p => {
+    const progressKey = `${p.id}_${req.user.id}`;
+    const todayProgress = (planProgress[progressKey] || {})[today] || { completed: [] };
+    const currentDay = getCurrentDayIndex(p);
+    const todayExercises = p.exercises.filter(e => e.dayIndex === currentDay);
+    return { ...p, todayCompleted: todayProgress.completed.length, todayTotal: todayExercises.length, currentDay };
+  });
+  res.json(plansWithProgress.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+});
 
-  if (role === 'member') {
-    plans = trainingPlans.filter(p => p.userId === userId && p.type === 'personal');
-  } else if (role === 'captain') {
-    plans = trainingPlans.filter(p =>
-      p.userId === userId ||
-      (p.type === 'voicePart' && p.targetPart === req.user.part)
-    );
-  } else if (role === 'admin') {
-    plans = trainingPlans;
+app.get('/api/plans/:id', requireAuth, (req, res) => {
+  const plan = trainingPlans.find(p => p.id === req.params.id);
+  if (!plan) return res.status(404).json({ error: 'Not found' });
+  if (plan.userId !== req.user.id && req.user.role !== 'admin') {
+    if (plan.type === 'personal' || req.user.role === 'member') return res.status(403).json({ error: 'Permission denied' });
   }
+  const today = new Date().toISOString().split('T')[0];
+  const progressKey = `${plan.id}_${req.user.id}`;
+  const userProgress = planProgress[progressKey] || {};
+  const currentDay = getCurrentDayIndex(plan);
+  const todayExercises = plan.exercises.filter(e => e.dayIndex === currentDay);
+  const todayProgress = userProgress[today] || { completed: [] };
+  res.json({ ...plan, currentDay, todayExercises, todayCompleted: todayProgress.completed, allProgress: userProgress });
+});
 
-  res.json(plans.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+app.post('/api/plans/:id/complete/:exId', requireAuth, (req, res) => {
+  const plan = trainingPlans.find(p => p.id === req.params.id);
+  if (!plan) return res.status(404).json({ error: 'Not found' });
+  const ex = plan.exercises.find(e => e.id === req.params.exId);
+  if (!ex) return res.status(404).json({ error: 'Exercise not found' });
+  const currentDay = getCurrentDayIndex(plan);
+  if (ex.dayIndex !== currentDay) return res.status(400).json({ error: '只能完成当天的任务' });
+  const today = new Date().toISOString().split('T')[0];
+  const progressKey = `${plan.id}_${req.user.id}`;
+  if (!planProgress[progressKey]) planProgress[progressKey] = {};
+  if (!planProgress[progressKey][today]) planProgress[progressKey][today] = { completed: [] };
+  if (!planProgress[progressKey][today].completed.includes(req.params.exId)) {
+    planProgress[progressKey][today].completed.push(req.params.exId);
+  }
+  saveData('planProgress.json', planProgress);
+  res.json({ success: true, completed: planProgress[progressKey][today].completed });
 });
 
 app.delete('/api/plans/:id', requireAuth, (req, res) => {
   const plan = trainingPlans.find(p => p.id === req.params.id);
   if (!plan) return res.status(404).json({ error: 'Plan not found' });
-  if (plan.userId !== req.user.id && req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Permission denied' });
-  }
+  if (plan.userId !== req.user.id && req.user.role !== 'admin') return res.status(403).json({ error: 'Permission denied' });
   const idx = trainingPlans.findIndex(p => p.id === req.params.id);
   trainingPlans.splice(idx, 1);
   saveData('trainingPlans.json', trainingPlans);
