@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Music, Upload, Plus, FileMusic, Eye, X, ExternalLink, Link as LinkIcon } from 'lucide-react';
+import { Music, Upload, Plus, FileMusic, Eye, X, ExternalLink, Link as LinkIcon, Search } from 'lucide-react';
 import { API_BASE } from '@/config';
 import { syncData, saveLocal } from '@/lib/localStorage';
 
@@ -31,6 +31,7 @@ export default function ScoreLibrary() {
   const [uploadMode, setUploadMode] = useState<'file' | 'link'>('file');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Sync: load from localStorage first, then sync with server
   useEffect(() => {
@@ -42,6 +43,14 @@ export default function ScoreLibrary() {
       }).then(() => {})
     ).then(setScores);
   }, []);
+
+  // Search filter
+  const filteredScores = searchQuery.trim()
+    ? scores.filter(s =>
+        s.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        s.composer.toLowerCase().includes(searchQuery.toLowerCase())
+      )
+    : scores;
 
   // Convert file to base64
   const fileToBase64 = (file: File): Promise<string> => {
@@ -136,15 +145,51 @@ export default function ScoreLibrary() {
         </div>
       </div>
 
-      {scores.length === 0 ? (
+      {/* Search */}
+      <div className="mb-4">
+        <div className="relative max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-neutral-500" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            placeholder="搜索曲目或作曲家..."
+            className="w-full bg-neutral-800 border border-neutral-700 rounded-lg pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:border-amber-500"
+          />
+          {searchQuery && (
+            <button
+              onClick={() => setSearchQuery('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+        {searchQuery && (
+          <p className="text-xs text-neutral-600 mt-1">
+            {filteredScores.length > 0 ? `找到 ${filteredScores.length} 个结果` : '未找到相关谱子'}
+          </p>
+        )}
+      </div>
+
+      {filteredScores.length === 0 ? (
         <div className="text-center py-20 bg-neutral-900 rounded-xl border border-neutral-800 border-dashed">
           <FileMusic className="w-12 h-12 text-neutral-700 mx-auto mb-4" />
-          <p className="text-neutral-500">还没有谱子</p>
-          <p className="text-sm text-neutral-600">点击右上角上传你的第一首合唱谱</p>
+          {searchQuery ? (
+            <>
+              <p className="text-neutral-500">未找到相关谱子</p>
+              <p className="text-sm text-neutral-600">试试其他关键词</p>
+            </>
+          ) : (
+            <>
+              <p className="text-neutral-500">还没有谱子</p>
+              <p className="text-sm text-neutral-600">点击右上角上传你的第一首合唱谱</p>
+            </>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {scores.map(s => (
+          {filteredScores.map(s => (
             <div key={s.id} className="bg-neutral-900 rounded-xl border border-neutral-800 p-5 hover:border-amber-500/30 transition-all group">
               <div className="flex items-start justify-between mb-3">
                 <div className="w-12 h-12 rounded-xl bg-amber-500/10 flex items-center justify-center">
