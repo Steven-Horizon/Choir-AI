@@ -305,60 +305,83 @@ export default function ScoreLibrary() {
         </div>
       )}
 
-      {/* Preview Modal */}
+      {/* Preview Modal with Watermark */}
       {preview && (preview.file_path || preview.external_url) && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-neutral-900 rounded-2xl border border-neutral-800 w-full max-w-4xl h-[80vh] flex flex-col">
+          <div className="bg-neutral-900 rounded-2xl border border-neutral-800 w-full max-w-4xl h-[85vh] flex flex-col">
             <div className="flex items-center justify-between p-4 border-b border-neutral-800">
               <div>
                 <h3 className="font-semibold">{preview.title}</h3>
                 <p className="text-xs text-neutral-500">{preview.composer} · {preview.key_sig} · ♩={preview.tempo}</p>
               </div>
-              <button onClick={() => setPreview(null)} className="text-neutral-500 hover:text-white"><X className="w-5 h-5" /></button>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] bg-red-500/10 text-red-400 px-2 py-1 rounded border border-red-500/20">版权保护 · 禁止外传</span>
+                <button onClick={() => setPreview(null)} className="text-neutral-500 hover:text-white p-1"><X className="w-5 h-5" /></button>
+              </div>
             </div>
-            <div className="flex-1 overflow-auto p-4 bg-neutral-950">
-              {/* External link preview */}
-              {preview.external_url ? (
-                <div className="flex flex-col items-center justify-center h-full">
-                  <LinkIcon className="w-12 h-12 text-blue-400 mb-4" />
-                  <p className="text-sm text-neutral-400 mb-2">文件存储在外部网盘</p>
-                  <p className="text-xs text-neutral-600 mb-6 max-w-md text-center break-all">{preview.external_url}</p>
-                  <a
-                    href={preview.external_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-2 px-6 py-3 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    在网盘打开
-                  </a>
+            <div className="flex-1 overflow-auto relative bg-neutral-950">
+              {/* Watermark overlay */}
+              <div className="absolute inset-0 pointer-events-none z-10 overflow-hidden">
+                <div className="absolute inset-0 flex items-center justify-center opacity-[0.06]">
+                  <span className="text-5xl font-bold text-amber-500 rotate-[-30deg] select-none whitespace-nowrap">
+                    ChoirAI · 仅供内部使用 · 禁止截图外传
+                  </span>
                 </div>
-              ) : isPdf(preview.file_path) ? (
-                <embed src={`${API_BASE}${preview.file_path}`} type="application/pdf" width="100%" height="100%" />
-              ) : isImage(preview.file_path) ? (
-                <img src={`${API_BASE}${preview.file_path}`} alt={preview.title} className="max-w-full mx-auto" />
-              ) : isAudio(preview.file_path) ? (
-                <div className="flex flex-col items-center justify-center h-full">
-                  <audio controls src={`${API_BASE}${preview.file_path}`} className="w-full max-w-md" />
-                  <p className="text-sm text-neutral-500 mt-4">{preview.title}</p>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center justify-center h-full text-neutral-500">
-                  <p>此文件类型不支持在线预览</p>
-                  <p className="text-sm text-neutral-600 mt-2">{preview.file_path?.split('/').pop()}</p>
-                  <a href={`${API_BASE}${preview.file_path}`} download className="mt-4 px-4 py-2 bg-amber-500/15 text-amber-400 rounded-lg text-sm hover:bg-amber-500/25">下载文件</a>
-                </div>
-              )}
+                {Array.from({ length: 15 }).map((_, row) =>
+                  Array.from({ length: 4 }).map((_, col) => (
+                    <span key={`${row}-${col}`} className="absolute text-xs text-amber-500/8 font-medium select-none"
+                      style={{ top: `${row * 100 + 30}px`, left: `${col * 250 + 60}px`, transform: 'rotate(-15deg)' }}>
+                      ChoirAI内部资料
+                    </span>
+                  ))
+                )}
+              </div>
+
+              <div className="relative z-0 p-4 flex items-center justify-center min-h-full">
+                {preview.external_url ? (
+                  <div className="flex flex-col items-center justify-center">
+                    <LinkIcon className="w-12 h-12 text-blue-400 mb-4" />
+                    <p className="text-sm text-neutral-400 mb-2">文件存储在外部网盘</p>
+                    <p className="text-xs text-neutral-600 mb-6 max-w-md text-center break-all">{preview.external_url}</p>
+                    <a href={preview.external_url} target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-2 px-6 py-3 bg-blue-500 text-white rounded-lg text-sm font-medium hover:bg-blue-600 transition-colors">
+                      <ExternalLink className="w-4 h-4" />在网盘打开
+                    </a>
+                  </div>
+                ) : isPdf(preview.file_path) ? (
+                  <div className="w-full h-full">
+                    <embed src={`${API_BASE}${preview.file_path}`} type="application/pdf" width="100%" height="100%" className="rounded-lg" />
+                  </div>
+                ) : isImage(preview.file_path) ? (
+                  <img src={`${API_BASE}${preview.file_path}`} alt={preview.title} className="max-w-full max-h-[70vh] mx-auto rounded-lg" />
+                ) : isAudio(preview.file_path) ? (
+                  <div className="flex flex-col items-center justify-center">
+                    <audio controls src={`${API_BASE}${preview.file_path}`} className="w-full max-w-md" />
+                    <p className="text-sm text-neutral-500 mt-4">{preview.title}</p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center text-neutral-500">
+                    <p>此文件类型不支持在线预览</p>
+                    <p className="text-sm text-neutral-600 mt-2">{preview.file_path?.split('/').pop()}</p>
+                    <a href={`${API_BASE}${preview.file_path}`} download className="mt-4 px-4 py-2 bg-amber-500/15 text-amber-400 rounded-lg text-sm hover:bg-amber-500/25">下载文件</a>
+                  </div>
+                )}
+              </div>
             </div>
-            <div className="p-4 border-t border-neutral-800 flex gap-2">
-              <Link to={`/sheet/${preview.id}`}
-                className="flex-1 text-center py-2 bg-green-500 text-black font-medium rounded-lg hover:bg-green-600"
-                onClick={() => setPreview(null)}>
-                查看五线谱
-              </Link>
-              <button onClick={() => setPreview(null)} className="px-4 py-2 bg-neutral-800 rounded-lg text-sm text-neutral-300 hover:bg-neutral-700">
-                关闭
-              </button>
+            <div className="p-4 border-t border-neutral-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-neutral-600">水印保护中</span>
+              </div>
+              <div className="flex gap-2">
+                <Link to={`/sheet/${preview.id}`}
+                  className="flex items-center gap-2 px-4 py-2 bg-green-500/10 rounded-lg text-sm text-green-400 hover:bg-green-500/20"
+                  onClick={() => setPreview(null)}>
+                  <Eye className="w-4 h-4" />五线谱视图
+                </Link>
+                <button onClick={() => setPreview(null)} className="px-4 py-2 bg-neutral-800 rounded-lg text-sm text-neutral-300 hover:bg-neutral-700">
+                  关闭
+                </button>
+              </div>
             </div>
           </div>
         </div>

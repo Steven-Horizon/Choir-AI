@@ -581,36 +581,29 @@ function callKimi(msgs, apiKey) {
   });
 }
 
-app.post('/api/chat', async (req, res) => {
-  const { message, sessionId, forceModel, attachments, kimiKey } = req.body;
+app.post('/api/chat', requireAuth, async (req, res) => {
+  const { message, sessionId, forceModel, attachments } = req.body;
   if (!message) return res.status(400).json({ error: 'Message required' });
 
-  const sid = sessionId || Date.now();
-  const history = messages.filter(m => m.session_id === sid);
+  const userId = req.user.id;
+  const sid = sessionId || 'session_' + Date.now();
+  const history = messages.filter(m => m.userId === userId && m.session_id === sid);
 
-  // Determine which model to use:
-  // 1. If user forces a model, use that
-  // 2. If there are image attachments AND Kimi key is available, use Kimi
-  // 3. Otherwise use DeepSeek (default)
-  const effectiveKimiKey = kimiKey || KIMI_API_KEY;
   const hasImageAttachments = attachments && attachments.some((a) => a.type && a.type.startsWith('image/'));
 
   let useKimiApi = false;
-  if (forceModel === 'kimi' && effectiveKimiKey) {
+  if (forceModel === 'kimi' && KIMI_API_KEY) {
     useKimiApi = true;
   } else if (forceModel === 'deepseek') {
     useKimiApi = false;
   } else {
-    // Auto: use Kimi if images present and key available, else DeepSeek
-    useKimiApi = hasImageAttachments && !!effectiveKimiKey;
+    useKimiApi = hasImageAttachments && !!KIMI_API_KEY;
   }
 
-  // Build messages
-  const msgs = [{ role: 'system', content: '你是 ChoirAI 合唱智能训练助手，擅长合唱训练指导、乐理知识、谱面分析、声部协调。' }];
+  const msgs = [{ role: 'system', content: '你是 ChoirAI 合唱智能训练助手，擅长合唱训练指导、乐理知识、谱面分析、声部协调。当用户提出训练需求（如"增强听力""改善音准"等），你需要分析其需求并给出专业的合唱练习建议。如果需要，你可以建议用户去"个人练习室"进行针对性训练。' }];
   history.forEach(h => msgs.push({ role: h.role, content: h.content }));
 
   if (useKimiApi && hasImageAttachments) {
-    // Kimi multimodal: send text + images
     const contentParts = [];
     contentParts.push({ type: 'text', text: message });
     attachments.forEach(att => {
@@ -620,9 +613,7 @@ app.post('/api/chat', async (req, res) => {
     });
     msgs.push({ role: 'user', content: contentParts });
   } else {
-    // DeepSeek or Kimi without images: just text
     let finalMessage = message;
-    // If there are non-image attachments, mention them in text
     if (attachments && attachments.length > 0) {
       const nonImageNames = attachments.filter(a => !a.type.startsWith('image/')).map(a => a.name).join(', ');
       if (nonImageNames) finalMessage += `\n[附件: ${nonImageNames}]`;
@@ -630,7 +621,7 @@ app.post('/api/chat', async (req, res) => {
     msgs.push({ role: 'user', content: finalMessage });
   }
 
-  messages.push({ session_id: sid, role: 'user', content: message, created_at: new Date().toISOString() });
+  messages.push({ userId, session_id: sid, role: 'user', content: message, created_at: new Date().toISOString() });
 
   try {
     let aiContent;
@@ -638,9 +629,8 @@ app.post('/api/chat', async (req, res) => {
 
     if (useKimiApi) {
       usedModel = 'kimi';
-      aiContent = await callKimi(msgs, effectiveKimiKey);
+      aiContent = await callKimi(msgs, KIMI_API_KEY);
     } else {
-      // DeepSeek
       const postData = JSON.stringify({ model: 'deepseek-chat', messages: msgs, temperature: 0.7, max_tokens: 2048 });
       aiContent = await new Promise((resolve, reject) => {
         const req = https.request({ hostname: 'api.deepseek.com', path: '/chat/completions', method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${DEEPSEEK_API_KEY}`, 'Content-Length': Buffer.byteLength(postData) }, timeout: 30000 }, (res) => { let data = ''; res.on('data', chunk => data += chunk); res.on('end', () => { try { const p = JSON.parse(data); if (p.choices?.[0]) resolve(p.choices[0].message.content); else reject(new Error('No response')); } catch(e) { reject(e); } }); });
@@ -648,21 +638,114 @@ app.post('/api/chat', async (req, res) => {
         req.write(postData); req.end();
       });
     }
-    messages.push({ session_id: sid, role: 'assistant', content: aiContent, created_at: new Date().toISOString() });
-    res.json({ sessionId: sid, content: aiContent, model: usedModel });
+
+    // AI Agent: detect training needs and auto-generate plan
+    const planSuggestion = detectTrainingPlan(message, aiContent);
+
+    messages.push({ userId, session_id: sid, role: 'assistant', content: aiContent, created_at: new Date().toISOString() });
+    saveData('messages.json', messages);
+    res.json({ sessionId: sid, content: aiContent, model: usedModel, planSuggestion });
   } catch (err) {
     console.error('Chat error:', err);
     const fallback = useKimiApi
       ? 'Kimi 服务暂时不可用。已自动切换到 DeepSeek，但图片分析功能不可用。'
       : '抱歉，AI服务暂时不可用。请稍后重试。';
-    messages.push({ session_id: sid, role: 'assistant', content: fallback, created_at: new Date().toISOString() });
+    messages.push({ userId, session_id: sid, role: 'assistant', content: fallback, created_at: new Date().toISOString() });
+    saveData('messages.json', messages);
     res.json({ sessionId: sid, content: fallback, _fallback: true });
   }
 });
 
-app.get('/api/chat/sessions', (req, res) => {
-  const unique = [...new Set(messages.map(m => m.session_id))];
-  res.json(unique.map(id => ({ id, title: messages.find(m => m.session_id === id && m.role === 'user')?.content?.slice(0, 30) || '新会话', created_at: messages.find(m => m.session_id === id)?.created_at })));
+app.get('/api/chat/sessions', requireAuth, (req, res) => {
+  const userId = req.user.id;
+  const userMessages = messages.filter(m => m.userId === userId);
+  const unique = [...new Set(userMessages.map(m => m.session_id))];
+  res.json(unique.map(id => ({
+    id, title: userMessages.find(m => m.session_id === id && m.role === 'user')?.content?.slice(0, 30) || '新会话',
+    created_at: userMessages.find(m => m.session_id === id)?.created_at
+  })));
+});
+
+// AI Agent: detect training needs from user message
+function detectTrainingPlan(userMsg, aiReply) {
+  const msg = userMsg.toLowerCase();
+  const goals = [];
+
+  if (msg.includes('听力') || msg.includes('听音') || msg.includes('听辨') || msg.includes('听写')) {
+    goals.push({ type: 'ear_training', title: '听力训练计划', desc: '音程听辨、和弦识别、旋律听写' });
+  }
+  if (msg.includes('音准') || msg.includes('跑调') || msg.includes('不准')) {
+    goals.push({ type: 'pitch', title: '音准强化计划', desc: '单音模唱、音程模唱、调式音阶' });
+  }
+  if (msg.includes('节奏') || msg.includes('节拍') || msg.includes('拍子')) {
+    goals.push({ type: 'rhythm', title: '节奏训练计划', desc: '基本节拍、切分节奏、复合节奏' });
+  }
+  if (msg.includes('气息') || msg.includes('呼吸')) {
+    goals.push({ type: 'breath', title: '气息控制计划', desc: '腹式呼吸、长音 sustaining、乐句控制' });
+  }
+  if (msg.includes('发声') || msg.includes('声音') || msg.includes('音色')) {
+    goals.push({ type: 'voice', title: '发声技巧计划', desc: '共鸣位置、声区统一、音色美化' });
+  }
+  if (msg.includes('视唱') || msg.includes('识谱') || msg.includes('读谱')) {
+    goals.push({ type: 'sight', title: '视唱练耳计划', desc: '五线谱速读、首调视唱、固定调视唱' });
+  }
+
+  if (goals.length === 0) return null;
+
+  return {
+    goals,
+    suggestedDuration: 15,
+    message: `根据你的需求，我为你制定了${goals.length}项训练计划。你可以：\n1. 点击"加入个人计划"添加到个人练习室\n2. 如果你是团干/声部长，可以选择"加入声部计划"推送给声部成员`,
+  };
+}
+
+// =================== TRAINING PLANS ===================
+app.post('/api/plans', requireAuth, (req, res) => {
+  const { title, type, exercises, targetPart } = req.body;
+  const plan = {
+    id: 'plan_' + Date.now(),
+    userId: req.user.id,
+    userName: req.user.name,
+    title: title || '未命名计划',
+    type: type || 'personal', // 'personal' or 'voicePart'
+    targetPart: targetPart || req.user.part,
+    exercises: exercises || [],
+    createdAt: new Date().toISOString(),
+  };
+  trainingPlans.push(plan);
+  saveData('trainingPlans.json', trainingPlans);
+  res.json({ success: true, plan });
+});
+
+app.get('/api/plans', requireAuth, (req, res) => {
+  const userId = req.user.id;
+  const role = req.user.role;
+  let plans = trainingPlans;
+
+  if (role === 'member') {
+    plans = trainingPlans.filter(p => p.userId === userId && p.type === 'personal');
+  } else if (role === 'captain') {
+    plans = trainingPlans.filter(p =>
+      p.userId === userId ||
+      (p.type === 'voicePart' && p.targetPart === req.user.part)
+    );
+  } else if (role === 'admin') {
+    plans = trainingPlans;
+  }
+
+  res.json(plans.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+});
+
+app.delete('/api/plans/:id', requireAuth, (req, res) => {
+  const plan = trainingPlans.find(p => p.id === req.params.id);
+  if (!plan) return res.status(404).json({ error: 'Plan not found' });
+  if (plan.userId !== req.user.id && req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Permission denied' });
+  }
+  const idx = trainingPlans.findIndex(p => p.id === req.params.id);
+  trainingPlans.splice(idx, 1);
+  saveData('trainingPlans.json', trainingPlans);
+  res.json({ success: true });
 });
 
 // =================== REHEARSAL RECORDINGS ===================
@@ -708,6 +791,64 @@ app.get('/api/rehearsal/stats', requireAuth, (req, res) => {
     userStats[r.userId].count++;
   });
   res.json({ totalRehearsals: rehearsalRecords.length, userStats: Object.values(userStats) });
+});
+
+// =================== AUDIO RECORDINGS (120s max) ===================
+const RECORDINGS_DIR = path.join(DATA_DIR, 'recordings');
+if (!fs.existsSync(RECORDINGS_DIR)) fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
+
+app.post('/api/rehearsal/audio', requireAuth, (req, res) => {
+  const { audioBase64, scoreId, scoreTitle, duration } = req.body;
+  if (!audioBase64) return res.status(400).json({ error: 'No audio data' });
+  if (duration > 120000) return res.status(400).json({ error: 'Recording exceeds 120 second limit' });
+
+  const id = 'audio_' + Date.now();
+  const filePath = path.join(RECORDINGS_DIR, `${id}.webm`);
+  const buffer = Buffer.from(audioBase64, 'base64');
+
+  try {
+    fs.writeFileSync(filePath, buffer);
+    const record = {
+      id, userId: req.user.id, userName: req.user.name, userPart: req.user.part || '',
+      scoreId: scoreId || '', scoreTitle: scoreTitle || '', duration: duration || 0,
+      fileName: `${id}.webm`, fileSize: buffer.length,
+      createdAt: new Date().toISOString(),
+    };
+    rehearsalRecords.push(record);
+    saveData('rehearsalRecords.json', rehearsalRecords);
+    res.json({ success: true, id, url: `/api/rehearsal/audio/${id}` });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save recording' });
+  }
+});
+
+app.get('/api/rehearsal/audio/:id', requireAuth, (req, res) => {
+  const record = rehearsalRecords.find(r => r.id === req.params.id);
+  if (!record) return res.status(404).json({ error: 'Not found' });
+  // Captain can listen to their voice part members' recordings
+  if (req.user.role !== 'admin' && record.userId !== req.user.id) {
+    if (req.user.role === 'captain' && record.userPart === req.user.part) {
+      // captain can access
+    } else {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+  }
+  const filePath = path.join(RECORDINGS_DIR, record.fileName);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+  res.setHeader('Content-Type', 'audio/webm');
+  fs.createReadStream(filePath).pipe(res);
+});
+
+app.get('/api/rehearsal/audio-list', requireAuth, (req, res) => {
+  let records = rehearsalRecords.filter(r => r.fileName); // only audio recordings
+  if (req.user.role === 'admin') {
+    // admin sees all
+  } else if (req.user.role === 'captain') {
+    records = records.filter(r => r.userId === req.user.id || r.userPart === req.user.part);
+  } else {
+    records = records.filter(r => r.userId === req.user.id);
+  }
+  res.json(records.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
 });
 
 // =================== USER AUTH ===================

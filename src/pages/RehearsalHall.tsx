@@ -34,6 +34,9 @@ export default function RehearsalHall() {
 
   // Recording history
   const [recordBuffer, setRecordBuffer] = useState<Array<{ partKey: string; volume: number; cents: number; timestamp: number }>>([]);
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [recorderStatus, setRecorderStatus] = useState<'idle' | 'recording' | 'stopped'>('idle');
+  const [recordingDuration, setRecordingDuration] = useState(0);
 
   const player = useMultiTrackPlayer();
   const startTimeRef = useRef(0);
@@ -41,6 +44,9 @@ export default function RehearsalHall() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const volumeHistory = useRef<Record<string, number[]>>({});
 
   useEffect(() => { fetch(`${API_BASE}/api/scores`).then(r => r.json()).then(setScores).catch(() => {}); }, []);
@@ -188,12 +194,51 @@ export default function RehearsalHall() {
 
   function freqToMidi(freq: number) { return 69 + 12 * Math.log2(freq / 440); }
 
+  const startRecording = useCallback(() => {
+    if (!micStreamRef.current) return;
+    recordedChunksRef.current = [];
+    const recorder = new MediaRecorder(micStreamRef.current, { mimeType: 'audio/webm;codecs=opus' });
+    mediaRecorderRef.current = recorder;
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) recordedChunksRef.current.push(e.data);
+    };
+
+    recorder.onstop = () => {
+      const blob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
+      setAudioBlob(blob);
+      setRecorderStatus('stopped');
+    };
+
+    recorder.start(1000); // collect every 1s
+    setRecorderStatus('recording');
+    setRecordingDuration(0);
+
+    // 120s limit timer
+    let elapsed = 0;
+    recordingTimerRef.current = setInterval(() => {
+      elapsed += 1;
+      setRecordingDuration(elapsed);
+      if (elapsed >= 120) {
+        recorder.stop();
+        if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+      }
+    }, 1000);
+  }, []);
+
   const handleStart = () => {
     if (!isListening) { startMic(); }
     setShowSetup(false);
     setIsRunning(true);
     startTimeRef.current = Date.now();
     setRecordBuffer([]);
+    setAudioBlob(null);
+    setRecorderStatus('idle');
+
+    // Start audio recording after mic is ready
+    setTimeout(() => {
+      startRecording();
+    }, 500);
 
     PARTS.forEach(p => { player.setPartEnabled(p.key, activeParts.includes(p.key)); });
 
@@ -222,6 +267,15 @@ export default function RehearsalHall() {
     cancelAnimationFrame(rafRef.current);
     player.stop();
 
+    // Stop recording
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+
     // Stop microphone
     if (micStreamRef.current) { micStreamRef.current.getTracks().forEach(t => t.stop()); micStreamRef.current = null; }
     if (audioCtxRef.current) { audioCtxRef.current.close(); audioCtxRef.current = null; }
@@ -237,10 +291,40 @@ export default function RehearsalHall() {
         body: JSON.stringify({
           scoreId: selectedScore.id, scoreTitle: selectedScore.title,
           startMeasure, endMeasure, bpm,
-          records: recordBuffer.slice(0, 1000), // limit
+          records: recordBuffer.slice(0, 1000),
         }),
       }).catch(() => {});
     }
+
+    // Upload audio after blob is ready
+    setTimeout(() => {
+      uploadAudio();
+    }, 1000);
+  };
+
+  const uploadAudio = async () => {
+    const blob = audioBlob || (recordedChunksRef.current.length > 0 ? new Blob(recordedChunksRef.current, { type: 'audio/webm' }) : null);
+    if (!blob || blob.size < 1000) return;
+
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64 = (reader.result as string).split(',')[1];
+      const token = localStorage.getItem('choirai_token');
+      try {
+        await fetch(`${API_BASE}/api/rehearsal/audio`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-auth-token': token || '' },
+          body: JSON.stringify({
+            audioBase64: base64,
+            scoreId: selectedScore?.id || '',
+            scoreTitle: selectedScore?.title || '',
+            duration: recordingDuration * 1000,
+          }),
+        });
+        setAudioBlob(null);
+      } catch {}
+    };
+    reader.readAsDataURL(blob);
   };
 
   const togglePart = (key: string) => {
@@ -401,6 +485,32 @@ export default function RehearsalHall() {
               </div>
             </div>
           )}
+
+          {/* Recording Status */}
+          <div className="p-4 border-b border-neutral-800">
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-sm font-medium text-neutral-300">录音状态</h3>
+              <span className={`text-xs px-2 py-0.5 rounded ${
+                recorderStatus === 'recording' ? 'bg-red-500/20 text-red-400' :
+                recorderStatus === 'stopped' ? 'bg-green-500/20 text-green-400' :
+                'bg-neutral-800 text-neutral-500'
+              }`}>
+                {recorderStatus === 'recording' ? '录制中' : recorderStatus === 'stopped' ? '已保存' : '未开始'}
+              </span>
+            </div>
+            {recorderStatus === 'recording' && (
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+                <span className="text-xs text-red-400 font-mono">{recordingDuration}s / 120s</span>
+                <div className="flex-1 h-1 bg-neutral-800 rounded-full overflow-hidden">
+                  <div className="h-full bg-red-500 transition-all" style={{ width: `${Math.min(100, (recordingDuration / 120) * 100)}%` }} />
+                </div>
+              </div>
+            )}
+            {recorderStatus === 'stopped' && (
+              <div className="text-xs text-green-400">录音已保存到服务器</div>
+            )}
+          </div>
 
           {/* Real-time meters - REAL DATA */}
           <div className="p-4 flex-1">

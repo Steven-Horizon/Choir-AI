@@ -3,9 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import {
   Menu, Plus, Send, Bot, User, Trash2, X,
   MessageSquare, Sparkles, ChevronLeft, Loader2,
-  Paperclip, FileText, ImageIcon
+  Paperclip, FileText, ImageIcon, Target, UserPlus, CheckCircle
 } from 'lucide-react';
 import { API_BASE } from '@/config';
+import { useAuth } from '@/contexts/AuthContext';
 import ReactMarkdown from 'react-markdown';
 
 interface ChatMessage {
@@ -30,15 +31,19 @@ interface ChatSession {
   createdAt: string;
 }
 
-function getUserKey(): string {
-  try { const u = JSON.parse(localStorage.getItem('choir_user') || '{}'); return u.id || 'guest'; } catch { return 'guest'; }
+interface PlanSuggestion {
+  goals: { type: string; title: string; desc: string }[];
+  suggestedDuration: number;
+  message: string;
 }
 
-function loadSessions(): ChatSession[] {
-  try { return JSON.parse(localStorage.getItem(`choir_chat_${getUserKey()}`) || '[]'); } catch { return []; }
+function getToken() { return localStorage.getItem('choirai_token') || ''; }
+
+function loadLocalSessions(): ChatSession[] {
+  try { return JSON.parse(localStorage.getItem('choirai_chat_sessions') || '[]'); } catch { return []; }
 }
-function saveSessions(sessions: ChatSession[]) {
-  localStorage.setItem(`choir_chat_${getUserKey()}`, JSON.stringify(sessions));
+function saveLocalSessions(sessions: ChatSession[]) {
+  localStorage.setItem('choirai_chat_sessions', JSON.stringify(sessions));
 }
 
 const WELCOME_MSG: ChatMessage = {
@@ -48,20 +53,21 @@ const WELCOME_MSG: ChatMessage = {
 **当前模型：DeepSeek V3**（文字对话）/ **Kimi**（图片分析）
 
 我可以帮你：
-- **制定训练计划** — 根据曲目和声部安排个性化方案
+- **制定训练计划** — 告诉我你的目标（如"增强听力""改善音准"），我会自动为你制定练习计划
 - **分析谱面** — 调性、难点段落、和声走向
 - **音准/节奏指导** — 针对性的练习建议
 - **合唱知识问答** — 乐理、发声技巧、声部协调
 - **分析五线谱图片** — 上传乐谱照片，自动切换到 Kimi 模型分析
 
-💡 上传图片时会自动使用 Kimi 模型进行图像分析。`,
+💡 试试说"我想增强听力能力"，我会为你制定专门的练习计划！`,
 };
 
 type AIModel = 'auto' | 'deepseek' | 'kimi';
 
 export default function AIAgent() {
   const navigate = useNavigate();
-  const [sessions, setSessions] = useState<ChatSession[]>(loadSessions);
+  const { user, isLoggedIn, isAdmin, isCaptain } = useAuth();
+  const [sessions, setSessions] = useState<ChatSession[]>(loadLocalSessions);
   const [currentId, setCurrentId] = useState<string>('');
   const [messages, setMessages] = useState<ChatMessage[]>([WELCOME_MSG]);
   const [input, setInput] = useState('');
@@ -70,6 +76,7 @@ export default function AIAgent() {
   const [isMobile, setIsMobile] = useState(false);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [model, setModel] = useState<AIModel>('auto');
+  const [planSuggestion, setPlanSuggestion] = useState<PlanSuggestion | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -77,8 +84,6 @@ export default function AIAgent() {
   const currentSession = sessions.find(s => s.id === currentId);
   const hasImageAttachments = attachments.some(a => a.type.startsWith('image/'));
 
-  // Model logic: backend decides based on forceModel + attachments
-  // Frontend just shows what will happen
   const effectiveModel: AIModel = model === 'auto'
     ? (hasImageAttachments ? 'kimi' : 'deepseek')
     : model;
@@ -91,7 +96,30 @@ export default function AIAgent() {
   }, []);
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, loading]);
-  useEffect(() => { saveSessions(sessions); }, [sessions]);
+  useEffect(() => { saveLocalSessions(sessions); }, [sessions]);
+
+  // Load sessions from backend
+  useEffect(() => {
+    if (!isLoggedIn) return;
+    fetch(`${API_BASE}/api/chat/sessions`, { headers: { 'x-auth-token': getToken() } })
+      .then(r => r.ok ? r.json() : [])
+      .then(data => {
+        if (data && data.length > 0) {
+          const backendSessions = data.map((s: any) => ({
+            id: s.id,
+            title: s.title,
+            messages: [WELCOME_MSG],
+            createdAt: s.created_at || new Date().toLocaleString(),
+          }));
+          setSessions(prev => {
+            const existingIds = new Set(prev.map(p => p.id));
+            const newSessions = backendSessions.filter((s: ChatSession) => !existingIds.has(s.id));
+            return [...newSessions, ...prev];
+          });
+        }
+      })
+      .catch(() => {});
+  }, [isLoggedIn]);
 
   const createNewSession = () => {
     const newId = 'chat_' + Date.now();
@@ -99,7 +127,7 @@ export default function AIAgent() {
     setSessions([newSession, ...sessions]);
     setCurrentId(newId);
     setMessages([WELCOME_MSG]);
-    setInput(''); setAttachments([]);
+    setInput(''); setAttachments([]); setPlanSuggestion(null);
     setSidebarOpen(false);
   };
 
@@ -107,7 +135,7 @@ export default function AIAgent() {
     setCurrentId(id);
     const s = sessions.find(x => x.id === id);
     if (s) setMessages(s.messages);
-    setSidebarOpen(false); setAttachments([]);
+    setSidebarOpen(false); setAttachments([]); setPlanSuggestion(null);
   };
 
   const deleteSession = (e: React.MouseEvent, id: string) => {
@@ -150,8 +178,38 @@ export default function AIAgent() {
     setAttachments(prev => prev.filter((_, i) => i !== index));
   };
 
+  // Add plan to user's practice
+  const addToPlan = async (type: 'personal' | 'voicePart') => {
+    if (!planSuggestion) return;
+    const token = getToken();
+    const exercises = planSuggestion.goals.map(g => ({
+      name: g.title,
+      type: g.type,
+      description: g.desc,
+      duration: Math.ceil(planSuggestion.suggestedDuration / planSuggestion.goals.length),
+    }));
+
+    try {
+      const res = await fetch(`${API_BASE}/api/plans`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-auth-token': token },
+        body: JSON.stringify({
+          title: planSuggestion.goals.map(g => g.title).join(' + '),
+          type,
+          exercises,
+          targetPart: user?.part,
+        }),
+      });
+      if (res.ok) {
+        alert(type === 'personal' ? '已添加到个人计划！' : '已添加到声部计划！');
+        setPlanSuggestion(null);
+      }
+    } catch {}
+  };
+
   const handleSend = async () => {
     if ((!input.trim() && attachments.length === 0) || loading) return;
+    if (!isLoggedIn) { alert('请先登录'); return; }
     const content = input.trim();
     setInput('');
 
@@ -174,17 +232,16 @@ export default function AIAgent() {
     const sentAttachments = [...attachments];
     setAttachments([]);
 
-    // Determine forceModel for backend
     let forceModel: string | undefined;
     if (model === 'deepseek') forceModel = 'deepseek';
     else if (model === 'kimi') forceModel = 'kimi';
-    // 'auto' lets backend decide based on attachments
 
     setLoading(true);
+    setPlanSuggestion(null);
     try {
       const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-auth-token': getToken() },
         body: JSON.stringify({
           message: content || '请帮我分析这张图片',
           sessionId: sid,
@@ -194,6 +251,11 @@ export default function AIAgent() {
       });
       if (!res.ok) throw new Error('API failed');
       const data = await res.json();
+
+      // Show plan suggestion if AI detected training needs
+      if (data.planSuggestion) {
+        setPlanSuggestion(data.planSuggestion);
+      }
 
       const aiMsg: ChatMessage = {
         id: Date.now() + 1, role: 'assistant',
@@ -237,6 +299,7 @@ export default function AIAgent() {
           {isMobile && <button onClick={() => setSidebarOpen(false)} className="p-1.5 rounded-lg hover:bg-neutral-800 text-neutral-400"><X className="w-4 h-4" /></button>}
         </div>
         <div className="flex-1 overflow-auto p-2 space-y-0.5">
+          {!isLoggedIn && <p className="text-xs text-neutral-600 text-center py-4">登录后查看历史会话</p>}
           {sessions.length === 0 ? <p className="text-xs text-neutral-600 text-center py-8">还没有会话</p> :
             sessions.map(s => (
               <button key={s.id} onClick={() => switchSession(s.id)}
@@ -292,12 +355,9 @@ export default function AIAgent() {
                     {msg.attachments.map((att, i) => (
                       <div key={i}>
                         {att.type?.startsWith('image/') && att.preview ? (
-                          <img 
-                            src={att.preview} 
-                            alt={att.name}
-                            className="max-w-[180px] max-h-[120px] rounded-lg object-cover border border-black/10" 
-                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                          />
+                          <img src={att.preview} alt={att.name}
+                            className="max-w-[180px] max-h-[120px] rounded-lg object-cover border border-black/10"
+                            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                         ) : (
                           <div className="flex items-center gap-1.5 bg-black/20 rounded-lg px-3 py-2 text-xs">
                             <FileText className="w-3.5 h-3.5" />
@@ -324,6 +384,40 @@ export default function AIAgent() {
               {msg.role === 'user' && <div className="w-7 h-7 rounded-full bg-amber-500/20 flex items-center justify-center flex-shrink-0 mt-0.5"><User className="w-4 h-4 text-amber-400" /></div>}
             </div>
           ))}
+
+          {/* AI Agent Plan Suggestion */}
+          {planSuggestion && (
+            <div className="bg-amber-500/5 border border-amber-500/20 rounded-xl p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <Target className="w-4 h-4 text-amber-400" />
+                <h3 className="text-sm font-semibold text-amber-400">AI为你制定了训练计划</h3>
+              </div>
+              <div className="space-y-2 mb-3">
+                {planSuggestion.goals.map((goal, i) => (
+                  <div key={i} className="flex items-start gap-2 bg-neutral-900 rounded-lg p-2.5">
+                    <CheckCircle className="w-4 h-4 text-green-400 mt-0.5" />
+                    <div>
+                      <div className="text-sm font-medium">{goal.title}</div>
+                      <div className="text-xs text-neutral-500">{goal.desc}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => addToPlan('personal')}
+                  className="flex items-center gap-1.5 px-3 py-2 bg-amber-500 text-black rounded-lg text-xs font-medium hover:bg-amber-400">
+                  <Target className="w-3.5 h-3.5" />加入个人计划
+                </button>
+                {(isAdmin || isCaptain) && (
+                  <button onClick={() => addToPlan('voicePart')}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-blue-500/20 text-blue-400 rounded-lg text-xs font-medium hover:bg-blue-500/30">
+                    <UserPlus className="w-3.5 h-3.5" />加入声部计划
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {loading && (
             <div className="flex gap-3">
               <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center flex-shrink-0"><Loader2 className="w-4 h-4 text-white animate-spin" /></div>
@@ -343,12 +437,8 @@ export default function AIAgent() {
                 <div key={i} className="relative group">
                   {att.type?.startsWith('image/') && att.preview ? (
                     <div className="relative">
-                      <img 
-                        src={att.preview} 
-                        alt={att.name} 
-                        className="w-16 h-16 rounded-lg object-cover border border-neutral-700" 
-                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
-                      />
+                      <img src={att.preview} alt={att.name} className="w-16 h-16 rounded-lg object-cover border border-neutral-700"
+                        onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} />
                       <button onClick={() => removeAttachment(i)} className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100"><X className="w-3 h-3 text-white" /></button>
                     </div>
                   ) : (
@@ -373,7 +463,7 @@ export default function AIAgent() {
             </button>
             <input ref={fileInputRef} type="file" multiple accept="image/*,.pdf,.txt,.doc,.docx" onChange={handleFileSelect} className="hidden" />
             <textarea ref={inputRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKeyDown}
-              placeholder={effectiveModel === 'kimi' ? "Kimi 模式：发送图片让我分析五线谱..." : "DeepSeek：问我关于合唱训练的问题..."}
+              placeholder={effectiveModel === 'kimi' ? "Kimi 模式：发送图片让我分析五线谱..." : "试试说'我想增强听力能力'..."}
               rows={1} className="flex-1 bg-neutral-800 border border-neutral-700 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-amber-500 resize-none min-h-[40px] max-h-[120px]" />
             <button onClick={handleSend} disabled={loading || (!input.trim() && attachments.length === 0)}
               className="w-10 h-10 rounded-xl bg-amber-500 flex items-center justify-center hover:bg-amber-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors flex-shrink-0">
@@ -381,7 +471,7 @@ export default function AIAgent() {
             </button>
           </div>
           <p className="text-[10px] text-neutral-600 text-center mt-2">
-            {effectiveModel === 'kimi' ? 'Kimi 模式：支持图片分析' : 'DeepSeek 模式：文字对话 · 上传图片自动切换 Kimi'}
+            {effectiveModel === 'kimi' ? 'Kimi 模式：支持图片分析' : 'DeepSeek 模式：文字对话 · 试试说"我想增强听力"'}
           </p>
         </div>
       </div>
