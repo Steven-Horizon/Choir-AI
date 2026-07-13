@@ -1,217 +1,182 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  ArrowLeft, CheckCircle, Wind, Music, AudioLines,
-  SlidersHorizontal, Mic, Clock, ChevronRight
+  ArrowLeft, CheckCircle, Sun, Moon,
+  Clock, RefreshCw, Wind, ChevronDown, ChevronUp
 } from 'lucide-react';
 import {
-  WARMUP_EXERCISES,
-  WARMUP_SONGS,
-  VOICE_PART_TIPS,
-  getCategories,
+  WARMUP_EXERCISES, WARMUP_SONGS, VOICE_PART_TIPS,
+  getTodayWarmupExercises,
 } from '@/lib/warmup-exercises';
 import { recordPractice } from '@/lib/ai-coach';
-
-const CAT_ICONS: Record<string, typeof Wind> = {
-  '一、打嘟': AudioLines,
-  '二、基础训练': Music,
-  '三、音层训练': SlidersHorizontal,
-  '四、音阶': Music,
-  '五、和声': Mic,
-  '六、开声曲': Wind,
-};
 
 export default function WarmUpRoom() {
   const [voicePart, setVoicePart] = useState('soprano');
   const [completed, setCompleted] = useState<Set<string>>(new Set());
-  const [expandedCat, setExpandedCat] = useState<string | null>(null);
+  const [tod, setTod] = useState<'morning'|'evening'>(() => { const h = new Date().getHours(); return h >= 6 && h < 18 ? 'morning' : 'evening'; });
+  const [showAll, setShowAll] = useState(false);
   const [elapsed, setElapsed] = useState(0);
-  const [timerActive, setTimerActive] = useState(false);
+  const [timerOn, setTimerOn] = useState(false);
+
+  const todayEx = getTodayWarmupExercises(5);
+  const list = tod === 'morning' ? todayEx.morning : todayEx.evening;
+  const tips = VOICE_PART_TIPS[voicePart] || VOICE_PART_TIPS.soprano;
+  const pct = list.length ? Math.round(completed.size / list.length * 100) : 0;
+  const allDone = list.length > 0 && list.every(e => completed.has(e.id));
+  const fmt = (s: number) => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+  const cats = [...new Set(WARMUP_EXERCISES.map(e => e.category))];
 
   useEffect(() => {
     const saved = localStorage.getItem('choirai_voice_part');
     if (saved) setVoicePart(saved);
+    const d = new Date().toISOString().split('T')[0];
+    const c = localStorage.getItem(`choirai_warmup_${d}`);
+    if (c) setCompleted(new Set(JSON.parse(c)));
   }, []);
 
   useEffect(() => {
-    let interval: ReturnType<typeof setInterval>;
-    if (timerActive) interval = setInterval(() => setElapsed(p => p + 1), 1000);
-    return () => clearInterval(interval);
-  }, [timerActive]);
+    let i: ReturnType<typeof setInterval>;
+    if (timerOn) i = setInterval(() => setElapsed(p => p + 1), 1000);
+    return () => clearInterval(i);
+  }, [timerOn]);
 
-  const toggleComplete = useCallback((id: string) => {
+  const toggle = (id: string) => {
     setCompleted(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      localStorage.setItem(`choirai_warmup_${new Date().toISOString().split('T')[0]}`, JSON.stringify([...n]));
+      return n;
     });
-  }, []);
-
-  const toggleTimer = () => {
-    if (timerActive) {
-      setTimerActive(false);
-      recordPractice(Math.ceil(elapsed / 60));
-    } else {
-      setTimerActive(true);
-    }
   };
-
-  const formatTime = (s: number) => `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
-  const categories = getCategories();
-  const tips = VOICE_PART_TIPS[voicePart] || VOICE_PART_TIPS.soprano;
-  const progress = WARMUP_EXERCISES.length > 0 ? Math.round((completed.size / WARMUP_EXERCISES.length) * 100) : 0;
 
   return (
     <div className="text-white -mx-4 -mt-4">
-      {/* Header */}
       <div className="sticky top-0 z-50 bg-neutral-950/80 backdrop-blur-md border-b border-neutral-800">
         <div className="max-w-2xl mx-auto px-4 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Link to="/" className="p-2 -ml-2 hover:bg-neutral-800 rounded-lg transition-colors">
-              <ArrowLeft className="w-5 h-5" />
-            </Link>
+            <Link to="/" className="p-2 -ml-2 hover:bg-neutral-800 rounded-lg"><ArrowLeft className="w-5 h-5" /></Link>
             <h1 className="font-semibold">开声练习</h1>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 text-sm text-neutral-400 font-mono">
-              <Clock className="w-4 h-4" />
-              {formatTime(elapsed)}
-            </div>
-            <button
-              onClick={toggleTimer}
-              className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${
-                timerActive ? 'bg-red-500/20 text-red-400' : 'bg-amber-500 text-black'
-              }`}
-            >
-              {timerActive ? '结束' : '开始计时'}
+          <div className="flex items-center gap-2">
+            <Clock className="w-4 h-4 text-neutral-500" />
+            <span className="text-sm text-neutral-400 font-mono">{fmt(elapsed)}</span>
+            <button onClick={() => { if (timerOn) { setTimerOn(false); recordPractice(Math.ceil(elapsed/60)); } else setTimerOn(true); }}
+              className={`px-3 py-1 rounded-lg text-xs font-medium ${timerOn ? 'bg-red-500/20 text-red-400' : 'bg-amber-500 text-black'}`}>
+              {timerOn ? '结束' : '计时'}
             </button>
           </div>
         </div>
       </div>
 
-      <div className="max-w-2xl mx-auto px-4 py-6">
-        {/* 声部选择 */}
-        <div className="flex flex-wrap gap-2 mb-4">
-          {[
-            { key: 'soprano', label: '女高音(S)' },
-            { key: 'alto', label: '女低音(A)' },
-            { key: 'tenor', label: '男高音(T)' },
-            { key: 'bass', label: '男低音(B)' },
-          ].map(vp => (
-            <button
-              key={vp.key}
-              onClick={() => { setVoicePart(vp.key); localStorage.setItem('choirai_voice_part', vp.key); }}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                voicePart === vp.key ? 'bg-amber-500 text-black' : 'bg-neutral-800 text-neutral-400 hover:bg-neutral-700'
-              }`}
-            >
-              {vp.label}
+      <div className="max-w-2xl mx-auto px-4 py-5">
+        {/* 声部 */}
+        <div className="flex gap-2 mb-3">
+          {['soprano','alto','tenor','bass'].map(p => (
+            <button key={p} onClick={() => { setVoicePart(p); localStorage.setItem('choirai_voice_part', p); }}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${voicePart === p ? 'bg-amber-500 text-black' : 'bg-neutral-800 text-neutral-400'}`}>
+              {p === 'soprano' ? 'S' : p === 'alto' ? 'A' : p === 'tenor' ? 'T' : 'B'}
             </button>
           ))}
         </div>
 
-        {/* 进度条 */}
-        <div className="mb-4">
-          <div className="h-1.5 bg-neutral-800 rounded-full overflow-hidden">
-            <div className="h-full bg-amber-500 transition-all duration-500" style={{ width: `${progress}%` }} />
-          </div>
-          <div className="flex justify-between mt-1 text-xs text-neutral-500">
-            <span>已完成 {completed.size}/{WARMUP_EXERCISES.length}</span>
-            <span>{progress}%</span>
-          </div>
+        {/* 早/晚 */}
+        <div className="flex gap-2 mb-3">
+          <button onClick={() => setTod('morning')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium border ${tod === 'morning' ? 'bg-orange-500/10 border-orange-500/30 text-orange-400' : 'bg-neutral-900 border-neutral-800 text-neutral-500'}`}>
+            <Sun className="w-4 h-4" />早间
+          </button>
+          <button onClick={() => setTod('evening')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-medium border ${tod === 'evening' ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-400' : 'bg-neutral-900 border-neutral-800 text-neutral-500'}`}>
+            <Moon className="w-4 h-4" />晚间
+          </button>
         </div>
 
-        {/* 声部提示 */}
-        <div className="bg-blue-500/5 rounded-xl p-4 mb-6 border border-blue-500/10">
-          <div className="flex items-start gap-2">
-            <Mic className="w-4 h-4 text-blue-400 mt-0.5 shrink-0" />
-            <div>
-              <div className="text-xs text-blue-400 font-medium mb-1">
-                {voicePart === 'soprano' ? '女高音' : voicePart === 'alto' ? '女低音' : voicePart === 'tenor' ? '男高音' : '男低音'}专属建议
-              </div>
-              <p className="text-sm text-neutral-400">{tips[0]}</p>
-            </div>
-          </div>
+        <div className="text-xs text-neutral-600 mb-3 flex items-center gap-1.5">
+          <RefreshCw className="w-3 h-3" />{todayEx.date} · 每日随机5条 · 勾选计入今日进度
         </div>
 
-        {/* 分类折叠列表 */}
-        <div className="space-y-3 mb-8">
-          {categories.map(cat => {
-            const exercises = WARMUP_EXERCISES.filter(e => e.category === cat);
-            const Icon = CAT_ICONS[cat] || Music;
-            const isExpanded = expandedCat === cat;
-            const catCompleted = exercises.filter(e => completed.has(e.id)).length;
+        <div className="h-2 bg-neutral-800 rounded-full overflow-hidden mb-1">
+          <div className="h-full bg-amber-500 transition-all" style={{ width: `${pct}%` }} />
+        </div>
+        <div className="flex justify-between text-xs text-neutral-500 mb-4">
+          <span>{completed.size}/{list.length} 已完成</span><span>{pct}%</span>
+        </div>
 
+        <div className="bg-blue-500/5 rounded-lg p-3 mb-4 border border-blue-500/10 text-xs text-blue-400">
+          {voicePart === 'soprano' ? '女高音' : voicePart === 'alto' ? '女低音' : voicePart === 'tenor' ? '男高音' : '男低音'}提示：{tips[0]}
+        </div>
+
+        {/* 今日5条 */}
+        <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
+          {tod === 'morning' ? <Sun className="w-4 h-4 text-orange-400" /> : <Moon className="w-4 h-4 text-indigo-400" />}
+          今日{tod === 'morning' ? '早间' : '晚间'}开声
+        </h2>
+
+        <div className="space-y-2 mb-6">
+          {list.map((ex, i) => {
+            const done = completed.has(ex.id);
             return (
-              <div key={cat} className="bg-neutral-900 rounded-xl border border-neutral-800 overflow-hidden">
-                <button
-                  onClick={() => setExpandedCat(isExpanded ? null : cat)}
-                  className="w-full flex items-center gap-3 p-4 text-left hover:bg-neutral-800/50 transition-colors"
-                >
-                  <div className="w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center shrink-0">
-                    <Icon className="w-4 h-4 text-amber-400" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-semibold text-sm">{cat}</div>
-                    <div className="text-xs text-neutral-500">{exercises.length}条 · 已完成{catCompleted}条</div>
-                  </div>
-                  <ChevronRight className={`w-4 h-4 text-neutral-500 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
-                </button>
-
-                {isExpanded && (
-                  <div className="border-t border-neutral-800">
-                    {exercises.map(ex => {
-                      const isDone = completed.has(ex.id);
-                      return (
-                        <button
-                          key={ex.id}
-                          onClick={() => toggleComplete(ex.id)}
-                          className={`w-full flex items-start gap-3 p-3 text-left transition-all ${
-                            isDone ? 'bg-green-500/5' : 'hover:bg-neutral-800/30'
-                          }`}
-                        >
-                          <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
-                            isDone ? 'bg-green-500/20' : 'bg-neutral-800'
-                          }`}>
-                            {isDone ? <CheckCircle className="w-4 h-4 text-green-400" /> : <div className="w-3 h-3 rounded-full border border-neutral-600" />}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className={`text-sm font-medium ${isDone ? 'text-green-400 line-through' : 'text-neutral-200'}`}>
-                              {ex.name}
-                            </div>
-                            <div className="text-xs text-neutral-500 font-mono mt-0.5">{ex.notation}</div>
-                            <div className="text-xs text-neutral-600 mt-1">{ex.description}</div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+              <button key={ex.id} onClick={() => toggle(ex.id)}
+                className={`w-full flex items-start gap-3 p-3.5 rounded-xl border text-left transition-all ${done ? 'bg-green-500/5 border-green-500/20' : 'bg-neutral-900 border-neutral-800 hover:border-neutral-700'}`}>
+                <div className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${done ? 'bg-green-500/20' : 'bg-neutral-800'}`}>
+                  {done ? <CheckCircle className="w-4 h-4 text-green-400" /> : <span className="text-xs text-neutral-500">{i+1}</span>}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className={`text-sm font-medium ${done ? 'text-green-400 line-through' : 'text-neutral-200'}`}>{ex.name}</div>
+                  <div className="text-xs text-neutral-500 font-mono">{ex.notation}</div>
+                  <div className="text-[10px] text-neutral-600">{ex.category}</div>
+                </div>
+              </button>
             );
           })}
         </div>
 
-        {/* 开声曲 */}
-        <div className="mb-8">
-          <h2 className="text-sm font-semibold text-neutral-300 mb-3">开声曲</h2>
-          <div className="grid grid-cols-3 gap-3">
-            {WARMUP_SONGS.map(song => (
-              <div key={song.id} className="bg-neutral-900 rounded-xl p-4 border border-neutral-800 text-center">
-                <Wind className="w-5 h-5 text-amber-400 mx-auto mb-2" />
-                <div className="font-semibold text-sm">{song.name}</div>
-                <div className="text-xs text-neutral-600 mt-1">{song.description}</div>
-              </div>
-            ))}
+        {allDone && (
+          <div className="text-center py-4 mb-6 bg-green-500/5 rounded-xl border border-green-500/20">
+            <CheckCircle className="w-8 h-8 text-green-400 mx-auto mb-1" />
+            <p className="text-sm text-green-400 font-medium">{tod === 'morning' ? '早间' : '晚间'}开声完成！</p>
           </div>
+        )}
+
+        {/* 开声曲 */}
+        <h2 className="text-sm font-semibold mb-2 text-neutral-300">开声曲</h2>
+        <div className="grid grid-cols-3 gap-2 mb-6">
+          {WARMUP_SONGS.map(s => (
+            <div key={s.id} className="bg-neutral-900 rounded-xl p-3 border border-neutral-800 text-center">
+              <Wind className="w-4 h-4 text-amber-400 mx-auto mb-1" />
+              <div className="text-sm font-medium">{s.name}</div>
+            </div>
+          ))}
         </div>
 
-        {/* 全部完成 */}
-        {progress === 100 && (
-          <div className="text-center py-6">
-            <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-3" />
-            <h2 className="text-xl font-bold mb-1">开声完成！</h2>
-            <p className="text-sm text-neutral-500">全部{WARMUP_EXERCISES.length}项练习已完成</p>
+        {/* 全部 */}
+        <button onClick={() => setShowAll(!showAll)}
+          className="w-full py-2.5 rounded-xl bg-neutral-900 border border-neutral-800 text-sm text-neutral-400 flex items-center justify-center gap-2 mb-4 hover:text-neutral-200">
+          {showAll ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          {showAll ? '收起' : '查看全部27条'}
+        </button>
+
+        {showAll && (
+          <div className="mb-6 space-y-4">
+            {cats.map(cat => (
+              <div key={cat}>
+                <div className="text-xs text-neutral-500 mb-1.5 font-medium">{cat}</div>
+                <div className="space-y-1">
+                  {WARMUP_EXERCISES.filter(e => e.category === cat).map(ex => {
+                    const done = completed.has(ex.id);
+                    return (
+                      <button key={ex.id} onClick={() => toggle(ex.id)}
+                        className={`w-full flex items-center gap-2 p-2 rounded-lg text-left ${done ? 'text-green-400' : 'text-neutral-400'}`}>
+                        <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${done ? 'bg-green-500 border-green-500' : 'border-neutral-600'}`}>
+                          {done && <CheckCircle className="w-3 h-3 text-white" />}
+                        </div>
+                        <span className={`text-xs ${done ? 'line-through' : ''}`}>{ex.name} · {ex.notation.slice(0, 25)}{ex.notation.length > 25 ? '...' : ''}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

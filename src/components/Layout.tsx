@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Home, Music, Mic2, Users, Monitor, Bot, CalendarCheck, Settings, LogOut, User, Menu, X } from 'lucide-react';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuth } from '@/contexts/AuthContext';
 
 const navItems = [
   { path: '/', label: '首页', icon: Home },
@@ -20,7 +20,7 @@ const PART_COLORS: Record<string, string> = {
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
-  const { user, isLoggedIn, logout, partLabel } = useAuth();
+  const { user, isLoggedIn, logout } = useAuth();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -96,7 +96,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
                 </div>
                 <div className="min-w-0 flex-1 overflow-hidden">
                   <p className="text-sm font-medium truncate">{user.name}</p>
-                  <p className="text-[10px] text-neutral-500">{partLabel || user.part}</p>
+                  <p className="text-[10px] text-neutral-500">{user.part}</p>
                 </div>
               </div>
               <button onClick={logout}

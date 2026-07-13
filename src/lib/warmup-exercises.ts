@@ -298,9 +298,33 @@ export function getCategories(): string[] {
   return [...new Set(WARMUP_EXERCISES.map(e => e.category))];
 }
 
-// 生成今日开声计划（按顺序取前N条）
-export function generateDailyWarmup(count: number = 10): WarmUpExercise[] {
-  return WARMUP_EXERCISES.slice(0, count);
+// Seeded random shuffle: same date = same order
+function seededShuffle<T>(arr: T[], seed: string): T[] {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = ((hash << 5) - hash) + seed.charCodeAt(i), hash |= 0;
+  const rng = () => { hash = (hash * 16807 + 0) % 2147483647; return (hash & 0x7fffffff) / 2147483647; };
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+// 获取今日开声条目：早晚各5条随机，用日期做种子
+export function getTodayWarmupExercises(count: number = 5): {
+  morning: WarmUpExercise[];
+  evening: WarmUpExercise[];
+  date: string;
+} {
+  const date = new Date().toISOString().split('T')[0];
+  const shuffled = seededShuffle(WARMUP_EXERCISES, date + 'choirai');
+  // Ensure we have at least variety between morning and evening
+  const morning = shuffled.slice(0, count);
+  const evening = seededShuffle(WARMUP_EXERCISES, date + 'evening').slice(0, count);
+  return { morning, evening, date };
+}
+
+// 兼容旧接口
+export function generateDailyWarmup(count: number = 5): WarmUpExercise[] {
+  return getTodayWarmupExercises(count).morning;
 }
 
 // 开声曲列表

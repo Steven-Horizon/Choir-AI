@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   ArrowLeft, Mic, Volume2, User, Trash2, AlertTriangle, Info, Shield, Users, LogOut
 } from 'lucide-react';
-import { useAuth } from '@/hooks/useAuth';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function Settings() {
   const { user, isAdmin, logout } = useAuth();
